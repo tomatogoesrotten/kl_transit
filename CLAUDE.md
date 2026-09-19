@@ -146,5 +146,11 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   the 3D buildings. Lines from `line.path` in `line.color`; stations placed ON the track via
   `pointAt`, not at their published coordinates (which sit up to 105 m off). The ADR 0001 risk is
   closed: maplibre-gl v6 is explicitly supported, via `MapLibreOverlay`. See `docs/decisions/0003`.
+- Two map modes (issue #12, not a GUIDE.md milestone): a switch toggles between the city and a
+  skeleton view with no basemap at all. Implemented by hiding every style layer except `background`,
+  never by `map.setStyle` — that rebuilds the style and destroys the layer the deck.gl overlay
+  targets with `beforeId`. The layer list is snapshotted at load, BEFORE the overlay is added:
+  deck.gl inserts its own layers into the style, so iterating the live list would hide the network
+  along with the city.
 - Next: Milestone 4 in GUIDE.md (trains that move). `MapView` holds the overlay in a ref precisely
   so the frame loop can call `overlay.setProps({ layers })` without a React re-render.
