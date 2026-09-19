@@ -1,0 +1,11 @@
+html, body, #root { height: 100%; margin: 0; }
+body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
+
+.caption {
+  position: absolute; left: 10px; top: 10px; z-index: 1;
+  padding: 8px 12px; border-radius: 8px;
+  background: rgba(17, 17, 17, 0.8); backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+.caption strong { display: block; font-size: 15px; }
+.caption span { color: #aaa; font-size: 12px; }
