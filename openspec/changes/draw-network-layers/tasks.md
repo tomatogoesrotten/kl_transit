@@ -56,5 +56,5 @@
 - [x] 5.4 Write `docs/decisions/0003-maplibre-overlay.md` recording that `MapLibreOverlay` from
       `@deck.gl/maplibre` supersedes `MapboxOverlay`, that this resolves the open risk in ADR 0001,
       and the interleaved-mode trade-offs. Link it from `docs/decisions/README.md`.
-- [ ] 5.5 Open a pull request referencing issue #8 with `Closes #8`, including what to look at in
+- [x] 5.5 Open a pull request referencing issue #8 with `Closes #8`, including what to look at in
       the browser.
