@@ -58,6 +58,9 @@ Conventions:
 - Vitest for tests
 - Python 3 (pandas, numpy) only for `scripts/build_network_json.py`
 - Library APIs move. Check the installed version's docs before using MapLibre or deck.gl APIs from memory.
+- `maplibre-gl` is in `optimizeDeps.exclude`. It spawns its tile worker from a URL relative to its
+  own module, and Vite's dep optimizer moves the module without the worker, so the worker 404s and
+  the map renders its background colour and nothing else. Don't remove it. See issue #10.
 
 ## Commands
 
@@ -123,7 +126,10 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 ## Definition of done for any task
 
 1. `npm test` and `npm run build` pass.
-2. I've been told how to check it in the browser.
+2. I've been told how to check it in the browser, **and somebody has actually looked**. HTTP 200 is
+   not a screenshot: a blank canvas serves exactly like a working one. A milestone whose done
+   criterion is visual is not done until a human has seen it. This rule exists because Milestone 1
+   shipped, and two more were built on top of it, while the map had never drawn a single tile.
 3. The Status section below is updated, and the work is committed with a clear message.
 
 ## Status
