@@ -15,8 +15,9 @@ Requested by the owner: two modes, switchable on the map.
 
 ## What Changes
 
-- A second mode, **skeleton**: every basemap layer hidden — roads, water, buildings, labels, POI
-  icons — leaving the eight lines, their 187 stations, and a flat ground.
+- A second mode, **wireframe**: the city reduced to a blueprint. Dark ground, streets as thin dim
+  lines, water dimmer still, buildings as translucent volumes with their footprints picked out in
+  light. Land-use fills, POI icons and place names gone. The network unchanged and brightest.
 - The existing view becomes the **city** mode, unchanged.
 - A switch on the map toggles between them.
 - The chosen mode survives a reload.
@@ -30,10 +31,9 @@ None.
 
 ### Modified Capabilities
 
-- `network-map`: gains the requirement that the network can be shown without the basemap, and that
-  the choice is the viewer's. The existing requirement that the network is drawn *among* the city
-  needs restating, because it is no longer unconditionally true — in skeleton mode there is no city
-  to be drawn among.
+- `network-map`: gains the requirement that the viewer can switch the city to a schematic view. The
+  existing requirement that the network is drawn *among* the city needs no change: the schematic
+  view still has buildings, so the network still composes with them.
 
 ## Impact
 
@@ -49,7 +49,11 @@ None.
 
 ## Non-goals
 
-- No third mode. A wireframe or blueprint look — dark ground with glowing building outlines — was
-  considered and set aside. It is a bigger piece of work and can be its own change.
+- No third mode. A first attempt hid the basemap entirely, leaving the network on an empty ground.
+  The owner looked at it and did not like it — the network alone loses all sense of place — so it is
+  replaced rather than kept alongside.
+- Not true wireframe buildings. MapLibre's `fill-extrusion` has no outline property, so edges cannot
+  be stroked. Translucent volumes plus a lit footprint layer is the approximation; reading building
+  tiles into deck.gl would be the upgrade, and is a new dependency for a visual effect.
 - Not a general basemap switcher. One style, two visibilities.
 - No per-line toggles. That is Milestone 6's lines panel.

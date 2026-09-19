@@ -1,7 +1,7 @@
 import type { MapMode } from '../map/modes'
 
 /**
- * Chooses between the city and the bare network.
+ * Chooses between the ordinary map of the city and the wireframe view of it.
  *
  * A real `<input type="checkbox" role="switch">`, not a styled div: keyboard
  * operation, the focus ring and the screen-reader announcement come for free,
@@ -23,10 +23,10 @@ export function ModeSwitch({
       <input
         type="checkbox"
         role="switch"
-        checked={mode === 'skeleton'}
-        onChange={(e) => onChange(e.target.checked ? 'skeleton' : 'city')}
+        checked={mode === 'wireframe'}
+        onChange={(e) => onChange(e.target.checked ? 'wireframe' : 'city')}
       />
-      Network only
+      Wireframe
     </label>
   )
 }

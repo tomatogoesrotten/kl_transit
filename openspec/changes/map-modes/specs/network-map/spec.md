@@ -1,50 +1,33 @@
 # Spec Delta
 
-## MODIFIED Requirements
-
-### Requirement: The network is drawn among the city, not over it
-
-Where a basemap is shown, network layers SHALL be rendered into the map's own three-dimensional
-scene, so that the city's buildings and the network occupy the same space and obscure each other
-correctly, rather than the network being painted flat on top of the finished map image.
-
-Where the viewer has chosen to hide the basemap, there is no city to compose with, and this
-requirement is satisfied trivially. The rendering path SHALL NOT change between the two: hiding the
-basemap hides basemap content, and does not switch the network to a different way of being drawn.
-
-#### Scenario: A tilted view with buildings
-
-- **WHEN** the map is tilted at a zoom where buildings are drawn
-- **THEN** the network and the buildings are composed as one scene, with depth respected between
-  them
-
-#### Scenario: Rendering is unavailable
-
-- **WHEN** the viewer's browser cannot provide the graphics capability this requires
-- **THEN** the map still loads and remains usable, and the failure is evident rather than silent
-
-#### Scenario: The basemap is hidden
-
-- **WHEN** the viewer hides the basemap
-- **THEN** the network is drawn by the same means as before, over an empty ground
-
 ## ADDED Requirements
 
-### Requirement: The viewer can hide the basemap and see the network alone
+### Requirement: The viewer can switch the city to a schematic view
 
-The viewer SHALL be able to choose between seeing the network over the map of the city, and seeing
-the network alone. When the basemap is hidden, no basemap content SHALL remain: no roads, water,
-land use, buildings, place names or point-of-interest markers.
+The viewer SHALL be able to choose between the ordinary map of the city and a schematic view of the
+same place: a dark ground, streets reduced to thin dim lines, buildings as translucent volumes with
+their footprints picked out in light, and the rail network unchanged and bright over all of it.
 
-#### Scenario: Hiding the city
+The schematic view SHALL show the city's structure — its street grid, its water, and where its
+buildings stand — while removing everything that competes with the network for attention: land-use
+and land-cover fills, points of interest, place names, and the ordinary map's colour.
 
-- **WHEN** the viewer switches to the network-only view
-- **THEN** only the lines, the stations and a plain ground remain, with nothing of the city visible
+#### Scenario: Switching to the schematic view
 
-#### Scenario: Bringing the city back
+- **WHEN** the viewer switches to the schematic view
+- **THEN** the ground is dark, streets and water are dim, buildings read as translucent volumes with
+  lit footprints, and the rail network is the brightest thing on screen
+
+#### Scenario: Returning to the city
 
 - **WHEN** the viewer switches back
-- **THEN** the map of the city returns exactly as it was, with the network over it
+- **THEN** the ordinary map returns exactly as it was, with every colour it had before
+
+#### Scenario: The network is unaffected
+
+- **WHEN** the viewer switches in either direction
+- **THEN** the lines and stations are drawn exactly as before, in the same colours, by the same
+  means
 
 ### Requirement: Switching does not move the camera
 
@@ -63,13 +46,13 @@ returned to the other every time.
 
 #### Scenario: Returning to the page
 
-- **WHEN** the viewer chooses the network-only view and later reloads
-- **THEN** the network-only view is shown
+- **WHEN** the viewer chooses the schematic view and later reloads
+- **THEN** the schematic view is shown
 
 #### Scenario: A first-time viewer
 
 - **WHEN** someone opens the page with no previous choice recorded
-- **THEN** the map of the city is shown, because "where is this" is the first question a newcomer has
+- **THEN** the ordinary map is shown, because "where is this" is the first question a newcomer has
 
 #### Scenario: The choice cannot be stored
 
@@ -97,7 +80,7 @@ interacting with it.
 The statement that positions come from a published schedule rather than a live feed SHALL remain
 visible in both views.
 
-#### Scenario: In the network-only view
+#### Scenario: In the schematic view
 
-- **WHEN** the basemap is hidden
+- **WHEN** the schematic view is shown
 - **THEN** the statement that positions are scheduled, not live, is still on screen
