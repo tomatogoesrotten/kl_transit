@@ -9,3 +9,10 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
 }
 .caption strong { display: block; font-size: 15px; }
 .caption span { color: #aaa; font-size: 12px; }
+
+.notice {
+  position: absolute; left: 10px; bottom: 10px; right: 10px; z-index: 1;
+  max-width: 28em; margin: 0;
+  padding: 8px 12px; border-radius: 8px;
+  background: rgba(120, 30, 30, 0.9); color: #fff;
+}
