@@ -146,5 +146,14 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   the 3D buildings. Lines from `line.path` in `line.color`; stations placed ON the track via
   `pointAt`, not at their published coordinates (which sit up to 105 m off). The ADR 0001 risk is
   closed: maplibre-gl v6 is explicitly supported, via `MapLibreOverlay`. See `docs/decisions/0003`.
+- Two map modes (issue #12, not a GUIDE.md milestone): a switch toggles between the city and a
+  wireframe view — dark ground, streets as thin dim lines, buildings as translucent volumes with
+  their footprints lit. Recoloured per layer with `setPaintProperty`, never by `map.setStyle`: that
+  rebuilds the style and destroys the layer the deck.gl overlay targets with `beforeId`. The layer
+  list is snapshotted at load, BEFORE the overlay is added — deck.gl inserts its own layers into the
+  style, so iterating the live list would restyle the network along with the city. MapLibre's
+  `fill-extrusion` has no outline property, so building edges cannot be stroked; the lit footprints
+  are a `line` layer we add on the same `building` source-layer. The palette lives in `WIREFRAME` in
+  `src/map/modes.ts` and is taste, not contract — tune it freely.
 - Next: Milestone 4 in GUIDE.md (trains that move). `MapView` holds the overlay in a ref precisely
   so the frame loop can call `overlay.setProps({ layers })` without a React re-render.

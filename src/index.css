@@ -10,6 +10,17 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
 .caption strong { display: block; font-size: 15px; }
 .caption span { color: #aaa; font-size: 12px; }
 
+/* Below MapLibre's navigation control (three 29px buttons, 10px in from the top
+   right), so the two never overlap — nor the caption, which is top left. */
+.mode-switch {
+  position: absolute; right: 10px; top: 110px; z-index: 1;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(17, 17, 17, 0.8); backdrop-filter: blur(4px);
+  font-size: 13px; cursor: pointer; user-select: none;
+}
+.mode-switch input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+
 .notice {
   position: absolute; left: 10px; bottom: 10px; right: 10px; z-index: 1;
   max-width: 28em; margin: 0;
