@@ -155,5 +155,19 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   `fill-extrusion` has no outline property, so building edges cannot be stroked; the lit footprints
   are a `line` layer we add on the same `building` source-layer. The palette lives in `WIREFRAME` in
   `src/map/modes.ts` and is taste, not contract — tune it freely.
-- Next: Milestone 4 in GUIDE.md (trains that move). `MapView` holds the overlay in a ref precisely
-  so the frame loop can call `overlay.setProps({ layers })` without a React re-render.
+- Milestone 4 done: trains move on the timetable. A `requestAnimationFrame` loop in `MapView`
+  advances a clock held in a ref, calls `activeTrains`, and writes to the overlay directly — React
+  is never involved. Each train is two `SolidPolygonLayer`s: a neutral body and a line-coloured
+  roof. Trains keep left (`left = (-cos B, +sin B)` in east/north — the one sign no type checker can
+  catch, so it has its own test), are sized as multiples of a camera-derived `W` so they hold a
+  constant pixel size until they floor at real-world metres, and sit at an assumed viaduct height.
+  Station markers fill while a train dwells, resolved BY STOP ID — `train.stop` indexes that
+  direction's list, and direction 1's is the reverse of direction 0's, which the markers are built
+  from.
+- The feed has no elevated-or-underground data. Trains are drawn at one assumed height, which is
+  right for the elevated majority, wrong under the tunnels, and occluded by tall buildings in the
+  city centre. The caption says so. Deriving real heights from OpenStreetMap is after-version-1.
+- `?t=HH:MM` forces the start time, for checking the map when real KL time has no service. Temporary
+  until Milestone 5's real clock controls; it is one constant in `MapView.tsx`.
+- Next: Milestone 5 in GUIDE.md (the clock and time controls). The clock record the loop already
+  uses is what those controls will drive.
