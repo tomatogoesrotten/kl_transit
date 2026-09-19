@@ -93,5 +93,5 @@
       the non-mutating `prepare`, the metre-space distance decision, the ported `nextDepartures`
       bug, and `firstDeparture` returning `null`. Verify the file exists and is linked from
       `docs/decisions/README.md`.
-- [ ] 6.4 Open a pull request referencing issue #5 with `Closes #5`, explaining `progress()` and
+- [x] 6.4 Open a pull request referencing issue #5 with `Closes #5`, explaining `progress()` and
       `activeTrains()` in plain English in the description.
