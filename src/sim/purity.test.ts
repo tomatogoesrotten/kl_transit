@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest'
+
+// CLAUDE.md: src/sim is pure TypeScript. No DOM, no clock, and no mutable state
+// held between calls, so every function can be tested at any moment in time.
+// This test guards that as the module grows.
+//
+// The sources are read with Vite's ?raw glob rather than node:fs because the
+// project has no @types/node, so `import 'node:fs'` would not type-check. The
+// glob is resolved on every run, so a file added to src/sim later is scanned too.
+// Test files are excluded: they may legitimately touch the clock and the host.
+const sources = import.meta.glob(['./*.ts', '!./*.test.ts'], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
+const banned = [
+  // `new Date(ms)` is fine - clock.ts converts a timestamp the caller supplied.
+  // Reading the clock itself is not.
+  { what: 'reads the clock with Date.now', pattern: /\bDate\.now\b/ },
+  { what: 'touches the DOM via document', pattern: /\bdocument\b/ },
+  // \b and the lower-case d/w keep `windows` and `HeadwayWindow` out of this.
+  { what: 'touches the browser via window', pattern: /\bwindow\b/ },
+  { what: 'declares top-level mutable state', pattern: /^(?:let|var)\b/ },
+]
+
+/** Every banned thing in one file, as "line 12: what: the offending line". */
+function violations(source: string): string[] {
+  const found: string[] = []
+  source.split('\n').forEach((line, i) => {
+    for (const rule of banned) {
+      if (rule.pattern.test(line)) found.push(`line ${i + 1}: ${rule.what}: ${line.trim()}`)
+    }
+  })
+  return found
+}
+
+describe('src/sim stays pure', () => {
+  const files = Object.keys(sources)
+
+  it('scans the modules in src/sim, and only those', () => {
+    // If the glob silently matched nothing, every test below would pass on air.
+    expect(files).toContain('./sim.ts')
+    expect(files.filter((f) => f.endsWith('.test.ts'))).toEqual([])
+  })
+
+  for (const file of files) {
+    it(`${file} has no clock, no DOM and no top-level let or var`, () => {
+      const found = violations(sources[file])
+      expect(found, `${file}:\n  ${found.join('\n  ')}`).toEqual([])
+    })
+  }
+})

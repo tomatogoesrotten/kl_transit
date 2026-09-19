@@ -101,6 +101,15 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 - Every first train starts at a terminal at 06:00, so roughly 06:00 to 07:30 looks emptier than real life.
 - No `calendar_dates.txt`: public holidays are treated as ordinary days. `calendar.txt` ends 2026-12-31.
 - Include whatever lines the feed marks valid (it currently includes the Shah Alam Line and BRT Sunway).
+- Headway windows are END-EXCLUSIVE. `[21600, 32400, 180]` means a train every 180 s from 06:00 up
+  to but not including 09:00. Ampang direction 0 yields 249 weekday departures, 209 on Sat and Sun.
+- Every direction's first stop has `arr` of 0, on all 16 directions. `progress()` leans on this.
+- Distances are Euclidean in the flat projection `network.json` carries in `origin` (`kx`, `ky`),
+  not geodesic. Ampang computes to 14892.7 m against the feed's stated 14893. Never swap in
+  haversine or turf.js: it would move every distance away from the timetable it was built against.
+- A degree of longitude here is 111,155 m; a degree of latitude is 110,574 m. Bearings must be
+  computed from the metre-space tangent, never from raw lon/lat deltas, or they tilt by up to 0.15
+  degrees.
 
 ## Sources and limits
 
@@ -121,4 +130,9 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 - Milestone 1 done: Vite + React + TS strict app, full-window MapLibre map of KL, tilted with 3D
   buildings. `data/network.json` is imported directly by `src/App.tsx` (Vite inlines it; no fetch,
   no copy in `public/` to go stale). `src/network.test.ts` guards its shape.
-- Next: Milestone 2 in GUIDE.md (port the Sim module).
+- Milestone 2 done: `src/sim/` is a pure TypeScript port of the prototype's Sim module, proved
+  against `reference/sim-golden.json` — all 7 cases and all 210 enumerated trains. 49 tests pass.
+  `src/sim/purity.test.ts` fails the build if anything in `src/sim` ever reads the clock, the DOM,
+  or top-level mutable state. Decisions recorded in `docs/decisions/0002`.
+- Next: Milestone 3 in GUIDE.md (draw the network on the map). Before writing it, confirm deck.gl's
+  `MapboxOverlay` supports maplibre-gl v6 — see `docs/decisions/0001`.
