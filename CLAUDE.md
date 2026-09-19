@@ -15,6 +15,37 @@ I'm newer to software development and I'm learning as I build. So:
 - After each change, tell me what changed, why, and how I can see it working.
 - Ask before adding a dependency, and say what it's for.
 
+## How we work
+
+Three rules, and the reasons they exist.
+
+1. **Spec first, with OpenSpec.** Before any task or change, run `/opsx:propose`. It writes the
+   proposal, spec, design and task list under `openspec/changes/`, so there is something to read and
+   argue with before a line of code exists. Read the plan, push back on it, then build it with
+   `/opsx:apply` and close it out with `/opsx:archive`. Use `/opsx:explore` when the shape of the work
+   isn't clear yet. No code before there is a spec: a wrong plan is cheap to throw away, a wrong
+   afternoon of code is not.
+2. **Delegate to subagents.** Code traversal (finding and reading code), implementation and document
+   writing all go to subagents. The main session stays for planning, review and decisions. Reading
+   twenty files fills a session with detail nobody needs to remember, and a session that has forgotten
+   the point starts making bad calls.
+3. **A branch per job.** Never commit to `main`. Every piece of work gets a GitHub issue, a branch
+   named after it, and a pull request that references the issue. Issues, PRs and wiki pages get proper
+   descriptions, not one-liners. This is how the industry works, and the habit is worth more than the
+   paperwork: `main` always builds, and in six months the history explains itself.
+
+Conventions:
+
+- Branches are `<type>/<short-kebab-description>`, where type is one of `feat`, `fix`, `chore`,
+  `docs`, `refactor`, `test`. For example `feat/sim-port`.
+- Commit subjects are conventional and in the imperative: `feat:`, `fix:`, `chore:`, `docs:`,
+  `test:`, `refactor:`. The body wraps, and explains why the change was made. The diff already
+  says what changed.
+- A pull request closes its issue with `Closes #N` in the description.
+- The wiki holds long-lived explanation: architecture, data-feed quirks, decisions and how things
+  came to be. `docs/` in the repo holds writing that must version alongside the code, so it changes
+  in the same commit as the code it describes. GUIDE.md stays the plan. CLAUDE.md stays the rules.
+
 ## Stack
 
 - Vite + React + TypeScript (strict)

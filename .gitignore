@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .DS_Store
 .venv/
+
+# Claude Code local overrides (the opsx commands and skills ARE committed)
+.claude/settings.local.json

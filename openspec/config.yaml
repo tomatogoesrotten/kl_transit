@@ -1,0 +1,60 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+context: |
+  KL Rail: a web app showing Klang Valley trains (LRT, MRT, monorail, BRT Sunway) moving on a 3D
+  map of Kuala Lumpur. Positions are CALCULATED from Prasarana's published GTFS timetable
+  (api.data.gov.my, category rapid-rail-kl). Rapid Rail has no live vehicle feed.
+
+  Stack: Vite + React + TypeScript (strict). MapLibre GL JS v6 for the map, OpenFreeMap "liberty"
+  style. deck.gl on top via MapboxOverlay in interleaved mode for tracks, stations and trains.
+  Vitest for tests. Python 3 (pandas, numpy) only for scripts/build_network_json.py.
+
+  Hard rules:
+  - Honesty rule: the UI must always say positions are scheduled, not live. Never invent, smooth
+    over or silently "fix" data. If the feed is wrong or missing, show that.
+  - src/sim/ is pure TypeScript: timetable in, positions out. No DOM, no map, no Date.now(). Time is
+    always passed in as an argument, so every function is testable.
+  - Kuala Lumpur is UTC+8 all year. Compute KL time explicitly from a UTC timestamp. Never rely on
+    the browser's local time zone.
+  - Units are metres, seconds and degrees (compass bearing, 0 = north, clockwise). Coordinates are
+    [lon, lat].
+  - Keep React out of the frame loop. Trains update 60 times a second by calling overlay.setProps on
+    deck.gl directly. React state is only for what a person changes: selection, speed, visible lines.
+  - Any change to src/sim needs a test. reference/sim-golden.json holds expected results.
+  - data/network.json is generated. Never edit it by hand. reference/ is read-only: port from it,
+    don't import it.
+
+  Workflow: conventional commits (feat/fix/chore/docs/test/refactor), a branch per job named
+  <type>/<short-kebab-description>, never commit to main, every job has an issue and a PR that
+  closes it. Done means npm test and npm run build pass.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
