@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Map, NavigationControl } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
-import { network, prepare } from '../sim'
-import { labelLayerId, networkLayers } from './layers'
+import { activeTrains, klNow, network, prepare, setTimeOfDay } from '../sim'
+import type { DayType } from '../sim'
+import { labelLayerId, lineLayer, stationDots, stationLayer } from './layers'
+import type { StationDot } from './layers'
+import { busyStations, halfWidth, lineColors, stationIndex, trainLayers, trainShapes } from './trains'
 import { FOOTPRINT_LAYER, layerOps, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
 import { ModeSwitch } from '../ui/ModeSwitch'
@@ -40,13 +43,59 @@ function saveMode(mode: MapMode) {
 const hasWebGL2 = document.createElement('canvas').getContext('webgl2') !== null
 
 const rail = prepare(network)
+// Parsed once, not once per train per frame.
+const COLORS = lineColors(rail)
+
+/**
+ * TEMPORARY, and only so this milestone can be looked at: `?t=08:30` starts the
+ * simulated clock at that time in Kuala Lumpur, because at a real KL 03:00 there
+ * is nothing running and an empty map proves nothing.
+ *
+ * Milestone 5 replaces it with real time controls. To remove it before then,
+ * delete this constant and the `??` that uses it in the clock below. It is
+ * deliberately not UI.
+ */
+const FORCED_START = (() => {
+  const m = /^(\d\d):(\d\d)$/.exec(new URLSearchParams(location.search).get('t') ?? '')
+  return m ? setTimeOfDay(Date.now(), Number(m[1]) * 3600 + Number(m[2]) * 60) : null
+})()
+
+/**
+ * The layers that never change, and what the frame loop needs to keep the
+ * station markers up to date.
+ *
+ * Built once, on the map's load. `stationDots` walks 187 stops calling
+ * `pointAt`, and the path layer re-tessellates thousands of vertices whenever
+ * its data changes — neither belongs in a loop that runs sixty times a second.
+ * Handing deck.gl the *same* layer instance again is how it is told nothing
+ * about that layer has changed.
+ */
+interface Statics {
+  beforeId: string
+  lines: ReturnType<typeof lineLayer>
+  dots: StationDot[]
+  // `ReturnType`, not `Map<string, number>`: MapLibre's `Map` is imported above
+  // and shadows the built-in one for the whole module.
+  index: ReturnType<typeof stationIndex>
+  stations: ReturnType<typeof stationLayer>
+  busyVersion: number
+}
 
 export function MapView() {
   const container = useRef<HTMLDivElement>(null)
-  // A ref, not state: Milestone 4 drives this from requestAnimationFrame, and a
-  // re-render sixty times a second is exactly what we are avoiding.
+  // A ref, not state: the animation loop drives this, and a re-render sixty
+  // times a second is exactly what we are avoiding.
   const overlay = useRef<MapLibreOverlay | null>(null)
   const map = useRef<Map | null>(null)
+  const statics = useRef<Statics | null>(null)
+  const frame = useRef(0)
+  /**
+   * Simulated time. A ref in `src/map` and not a module in `src/sim`, because
+   * `src/sim/purity.test.ts` fails the build on mutable state or `Date.now()`
+   * there. For now it simply runs at real speed; Milestone 5 adds pause, speed
+   * and a day-type override, which is what `override` is already here for.
+   */
+  const clock = useRef({ ms: FORCED_START ?? Date.now(), override: 'auto' as DayType | 'auto' })
   // The style's own layers, captured before deck.gl adds anything of its own.
   // Two reasons, both load-bearing: switching modes must never touch the
   // network's layers, and each entry still carries the paint liberty shipped,
@@ -108,7 +157,15 @@ export function MapView() {
         } else {
           const deck = new MapLibreOverlay({ interleaved: true })
           m.addControl(deck)
-          deck.setProps({ layers: networkLayers(rail, beforeId) })
+          const dots = stationDots(rail)
+          statics.current = {
+            beforeId,
+            lines: lineLayer(rail, beforeId),
+            dots,
+            index: stationIndex(dots),
+            stations: stationLayer(dots, beforeId, 0),
+            busyVersion: 0,
+          }
           overlay.current = deck
         }
       }
@@ -116,9 +173,67 @@ export function MapView() {
       setStyleLoaded(true)
     })
 
+    // The frame loop. It starts now and does nothing until the overlay exists —
+    // which is also what happens for good when there is no WebGL2, or when the
+    // style had no label layer to anchor the overlay to.
+    let last = performance.now()
+    const tick = (now: number) => {
+      // Re-armed first, so a throw below costs one frame rather than the whole
+      // animation.
+      frame.current = requestAnimationFrame(tick)
+
+      // Clamped: a tab that has been in the background for thirty seconds comes
+      // back with a thirty-second delta, and advancing the timetable by that in
+      // one step teleports every train.
+      const dt = Math.min(250, now - last)
+      last = now
+      clock.current.ms += dt
+
+      const deck = overlay.current
+      const s = statics.current
+      if (!deck || !s) return
+
+      const t = klNow(clock.current.ms, clock.current.override)
+      const trains = activeTrains(rail, t.sec, t.today, t.yesterday)
+      // A train's size follows the camera, so both are read fresh each frame.
+      const W = halfWidth(m.getZoom(), m.getCenter().lat)
+
+      // Stations fill while a train stands at them. `dots` is one array mutated
+      // in place, so the layer is rebuilt with a new trigger only when the set
+      // actually changed — most frames it has not.
+      const busy = busyStations(trains, s.index)
+      let changed = false
+      for (let i = 0; i < s.dots.length; i++) {
+        const on = busy.has(i)
+        if (s.dots[i].busy !== on) {
+          s.dots[i].busy = on
+          changed = true
+        }
+      }
+      if (changed) {
+        s.busyVersion += 1
+        s.stations = stationLayer(s.dots, s.beforeId, s.busyVersion)
+      }
+
+      // Straight to deck.gl, never through React state. The two static layers go
+      // back as the same instances; only the trains are new.
+      deck.setProps({
+        layers: [
+          s.lines,
+          s.stations,
+          ...trainLayers(trainShapes(trains, W, COLORS), W, s.beforeId),
+        ],
+      })
+    }
+    frame.current = requestAnimationFrame(tick)
+
     return () => {
+      // In the same cleanup as the map, or React's development double-mount
+      // leaves two loops racing on one overlay.
+      cancelAnimationFrame(frame.current)
       overlay.current?.finalize()
       overlay.current = null
+      statics.current = null
       map.current = null
       // So a remount (React's StrictMode does one in development) re-applies the
       // mode to the new map rather than assuming the old one is still there.

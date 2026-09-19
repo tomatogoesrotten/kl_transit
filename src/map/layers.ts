@@ -4,7 +4,7 @@ import type { PreparedNetwork } from '../sim'
 
 // deck.gl accepts a `beforeId` naming the MapLibre layer to draw beneath, but
 // @deck.gl/maplibre does not add it to the public layer prop types, so we say so.
-type Interleaved = { beforeId: string }
+export type Interleaved = { beforeId: string }
 
 /**
  * The style layer to draw the network beneath: above the base map and its
@@ -28,7 +28,20 @@ export interface StationDot {
   id: string
   position: [lon: number, lat: number]
   color: [number, number, number]
+  /**
+   * True while a train is standing at this platform. Mutated in place by the
+   * frame loop, which is why the layer below carries an `updateTriggers`.
+   */
+  busy: boolean
 }
+
+/**
+ * The fill of a station nobody is standing at: invisible, not a background
+ * colour. The prototype could fill with the page background because it drew on
+ * a flat shader ground; here there is a real map underneath and an opaque fill
+ * would punch a hole in the city.
+ */
+const IDLE: [number, number, number, number] = [0, 0, 0, 0]
 
 /**
  * One dot per stop per line, placed on the track.
@@ -49,41 +62,59 @@ export function stationDots(rail: PreparedNetwork): StationDot[] {
     if (!forward) continue
     for (const stop of forward.stops) {
       const p = pointAt(line, stop.at, false)
-      dots.push({ id: stop.id, position: [p.lon, p.lat], color })
+      dots.push({ id: stop.id, position: [p.lon, p.lat], color, busy: false })
     }
   }
   return dots
 }
 
+/** One path over every line. Built once: it re-tessellates when its data changes. */
+export function lineLayer(rail: PreparedNetwork, beforeId: string) {
+  return new PathLayer<PreparedNetwork['lines'][number], Interleaved>({
+    id: 'lines',
+    data: rail.lines,
+    beforeId,
+    getPath: (line) => line.path,
+    getColor: (line) => hexToRgb(line.color),
+    // Pixels, not metres: a real track is about three metres wide, which at
+    // city-wide zoom is less than one pixel and vanishes. A constant pixel
+    // width needs no min or max — it is already the same at every zoom.
+    widthUnits: 'pixels',
+    getWidth: 4,
+    capRounded: true,
+    jointRounded: true,
+  })
+}
+
+/**
+ * One dot over every stop, filled while a train stands at it.
+ *
+ * `filled` is a layer-level property, so it cannot be turned on for one marker.
+ * The fill is therefore always drawn and made transparent when idle.
+ *
+ * `dots` is a single array mutated in place, which deck.gl cannot see into.
+ * `busyVersion` is how it is told: bump it when the busy set changes, and leave
+ * it alone when it has not.
+ */
+export function stationLayer(dots: StationDot[], beforeId: string, busyVersion: number) {
+  return new ScatterplotLayer<StationDot, Interleaved>({
+    id: 'stations',
+    data: dots,
+    beforeId,
+    getPosition: (d) => d.position,
+    getLineColor: (d) => d.color,
+    filled: true,
+    getFillColor: (d) => (d.busy ? d.color : IDLE),
+    stroked: true,
+    radiusUnits: 'pixels',
+    getRadius: 4,
+    lineWidthUnits: 'pixels',
+    getLineWidth: 2,
+    updateTriggers: { getFillColor: busyVersion },
+  })
+}
+
 /** The whole network: one path layer over every line, one dot layer over every stop. */
 export function networkLayers(rail: PreparedNetwork, beforeId: string) {
-  return [
-    new PathLayer<PreparedNetwork['lines'][number], Interleaved>({
-      id: 'lines',
-      data: rail.lines,
-      beforeId,
-      getPath: (line) => line.path,
-      getColor: (line) => hexToRgb(line.color),
-      // Pixels, not metres: a real track is about three metres wide, which at
-      // city-wide zoom is less than one pixel and vanishes. A constant pixel
-      // width needs no min or max — it is already the same at every zoom.
-      widthUnits: 'pixels',
-      getWidth: 4,
-      capRounded: true,
-      jointRounded: true,
-    }),
-    new ScatterplotLayer<StationDot, Interleaved>({
-      id: 'stations',
-      data: stationDots(rail),
-      beforeId,
-      getPosition: (d) => d.position,
-      getLineColor: (d) => d.color,
-      filled: false,
-      stroked: true,
-      radiusUnits: 'pixels',
-      getRadius: 4,
-      lineWidthUnits: 'pixels',
-      getLineWidth: 2,
-    }),
-  ]
+  return [lineLayer(rail, beforeId), stationLayer(stationDots(rail), beforeId, 0)]
 }
