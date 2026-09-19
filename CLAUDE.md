@@ -52,7 +52,9 @@ Conventions:
 - MapLibre GL JS v6 for the map (v5 and below carry a critical XSS advisory), OpenFreeMap "liberty"
   style (`https://tiles.openfreemap.org/styles/liberty`, no key). Liberty already ships a `building-3d`
   fill-extrusion layer at minzoom 14, so we don't add our own.
-- deck.gl on top of MapLibre (`MapboxOverlay`, interleaved) for tracks, stations and trains
+- deck.gl on top of MapLibre for tracks, stations and trains: `MapLibreOverlay` from
+  `@deck.gl/maplibre`, interleaved. NOT `MapboxOverlay` — that module declares no `maplibre-gl` peer
+  dependency and duck-types the map. See `docs/decisions/0003`.
 - Vitest for tests
 - Python 3 (pandas, numpy) only for `scripts/build_network_json.py`
 - Library APIs move. Check the installed version's docs before using MapLibre or deck.gl APIs from memory.
@@ -134,5 +136,9 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   against `reference/sim-golden.json` — all 7 cases and all 210 enumerated trains. 49 tests pass.
   `src/sim/purity.test.ts` fails the build if anything in `src/sim` ever reads the clock, the DOM,
   or top-level mutable state. Decisions recorded in `docs/decisions/0002`.
-- Next: Milestone 3 in GUIDE.md (draw the network on the map). Before writing it, confirm deck.gl's
-  `MapboxOverlay` supports maplibre-gl v6 — see `docs/decisions/0001`.
+- Milestone 3 done: the network is drawn over the map with deck.gl, interleaved so it composes with
+  the 3D buildings. Lines from `line.path` in `line.color`; stations placed ON the track via
+  `pointAt`, not at their published coordinates (which sit up to 105 m off). The ADR 0001 risk is
+  closed: maplibre-gl v6 is explicitly supported, via `MapLibreOverlay`. See `docs/decisions/0003`.
+- Next: Milestone 4 in GUIDE.md (trains that move). `MapView` holds the overlay in a ref precisely
+  so the frame loop can call `overlay.setProps({ layers })` without a React re-render.

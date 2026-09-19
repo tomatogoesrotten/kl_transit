@@ -17,3 +17,4 @@ design document, and that belongs in `openspec/changes/`.
 |---|---|---|
 | [0001](0001-maplibre-v6-and-direct-json-import.md) | MapLibre v6, and importing network.json directly | Accepted |
 | [0002](0002-sim-port-conventions.md) | Conventions fixed by the simulation port | Accepted |
+| [0003](0003-maplibre-overlay.md) | MapLibreOverlay, not MapboxOverlay | Accepted |

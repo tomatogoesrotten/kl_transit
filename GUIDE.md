@@ -148,8 +148,10 @@ you could explain them to someone else.
 ```
 We're doing Milestone 3 from GUIDE.md and nothing else.
 
-Add deck.gl on top of the MapLibre map using MapboxOverlay in interleaved mode, so layers sit
-among the 3D buildings properly. Check the installed versions' docs for the current integration.
+Add deck.gl on top of the MapLibre map using MapLibreOverlay from @deck.gl/maplibre in interleaved
+mode, so layers sit among the 3D buildings properly. (This guide originally said MapboxOverlay;
+deck.gl 9.4 ships a dedicated MapLibre module and that is what v6 needs. See docs/decisions/0003 —
+and note this is exactly why the guide says to check the installed version's docs.)
 
 Draw every line from network.json as a path in its official colour, with a width in pixels that
 stays readable at any zoom. Draw every station as a small ring in its line colour, placed ON the
