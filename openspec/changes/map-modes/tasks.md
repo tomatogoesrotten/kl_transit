@@ -38,7 +38,7 @@
 
 - [x] 4.1 Keep the scheduled-not-live statement visible in both modes. Verify by eye in each.
 - [x] 4.2 Run `npm test` and `npm run build`; both must pass with the existing 58 tests green.
-- [ ] 4.3 **Look at it in a browser, in both modes**, and confirm. Per `CLAUDE.md`'s definition of
+- [x] 4.3 **Look at it in a browser, in both modes**, and confirm. Per `CLAUDE.md`'s definition of
       done, this task is not complete until a human has actually seen it.
 - [x] 4.4 Update `CLAUDE.md`'s Status, and open a pull request referencing issue #12 with
       `Closes #12`.
