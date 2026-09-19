@@ -212,9 +212,12 @@ every direction (verified on all 16), so `i === 0` always takes the dwelling bra
 adds one explicit guard rather than a non-null assertion, so the invariant is stated rather than
 assumed.
 
-**`(b.arr - a.dep)` could be zero**, giving `Infinity` or `NaN` that would propagate silently into
-rendered positions. Never zero in the shipped feed (verified), but one guard costs nothing and a
-refresh could introduce it.
+**`(b.arr - a.dep)` cannot be zero.** This was written as a defence against a malformed feed, and
+that was wrong: reaching the moving branch requires both `offset >= a.dep` (the loop advanced past
+stop `i-1`) and `offset < b.arr`, so `b.arr - a.dep <= 0` is a contradiction rather than merely
+absent from this feed. The guard is implemented as specified, but it is unreachable by construction
+on any input, not just this one. Kept because it costs nothing and states the invariant; recorded
+here so nobody later mistakes it for protection it does not provide.
 
 ## Migration Plan
 
