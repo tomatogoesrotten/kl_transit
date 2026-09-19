@@ -30,6 +30,10 @@ export function MapView() {
     })
     map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right')
 
+    // A map that fails quietly is how this project shipped three milestones on
+    // top of a base map that never drew a single tile. Say something.
+    map.on('error', (e) => console.error('maplibre error:', e.error ?? e))
+
     if (hasWebGL2) {
       map.on('load', () => {
         const beforeId = labelLayerId(map.getStyle().layers)
