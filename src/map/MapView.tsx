@@ -221,6 +221,14 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   // The last camera padding applied, so a one-shot move to a station is framed
   // in the same visible box the follow camera centres in.
   const padding = useRef<PaddingOptions>({ top: 0, right: 0, bottom: 0, left: 0 })
+  // Which pointers are currently down on the map. Read by the frame loop, so a
+  // ref rather than state: it changes on every press and must not re-render.
+  //
+  // A set rather than a flag, because touch rotation uses two fingers: with a
+  // flag, the first finger lifting clears it while the second is still down, the
+  // camera resumes mid-gesture, and the twist dies. A set also survives a
+  // pointer whose release is never delivered, since the id simply never returns.
+  const steering = useRef(new Set<number>())
 
   useEffect(() => {
     const m = new Map({
@@ -301,12 +309,40 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // back.
     m.on('dragstart', () => useView.getState().stopFollowing())
 
+    // Rotating and tilting are NOT taking the map back, so they must not stop
+    // following — and MapLibre fires `rotatestart`/`pitchstart` for those, never
+    // `dragstart`, so nothing above cancels them.
+    //
+    // They were still impossible, for a reason that is not in the event names.
+    // `jumpTo` calls `stop()`, and MapLibre's `_stop` ends with
+    // `return e || this._stopHandlers(), this` — with no argument that is
+    // falsy, so it aborts whatever gesture is in progress. The follow camera
+    // calls `jumpTo` sixty times a second, so it killed the drag before it could
+    // become anything.
+    //
+    // Listening for `rotatestart` cannot fix that: it is a race between our
+    // frame and MapLibre's, and the gesture loses it. So this watches the
+    // pointer instead, which is known before MapLibre has processed anything: if
+    // a button or finger is down on the map, the camera does not write. The
+    // train drifts off centre during the drag and glides back on release, which
+    // is right — it is the viewer's gesture, and the camera should not argue
+    // with it mid-drag.
+    //
+    // `pointerup` and `pointercancel` are on the window, not the canvas, so a
+    // release outside the map still clears it rather than sticking on.
+
     // Which kind of pointer is in use, for the hover suppression above. Removed
     // in the cleanup, or React's development double-mount leaves two behind.
     const notePointer = (e: PointerEvent) => {
       coarse.current = e.pointerType !== 'mouse'
+      steering.current.add(e.pointerId)
+    }
+    const releasePointer = (e: PointerEvent) => {
+      steering.current.delete(e.pointerId)
     }
     m.getContainer().addEventListener('pointerdown', notePointer)
+    window.addEventListener('pointerup', releasePointer)
+    window.addEventListener('pointercancel', releasePointer)
 
     // MapLibre already gives its canvas tabindex="0" and its own keyboard
     // handler, so arrow keys pan and +/- zoom once it has focus. All this does
@@ -571,7 +607,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       if (view.following && view.selection?.kind === 'train') {
         const train = findTrain(shown, view.selection)
         const drawn = train && instanceOf(byMode, train.id)
-        if (drawn) {
+        if (drawn && steering.current.size === 0) {
           // A jump every frame, closing part of the gap — see FOLLOW_MS. The
           // zoom, pitch and bearing are left exactly as the viewer set them.
           const centre = m.getCenter()
@@ -582,7 +618,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
               centre.lat + (drawn.position[1] - centre.lat) * k,
             ],
           })
-        } else {
+        } else if (!drawn) {
           // Its trip ended, or its line was hidden. Either way there is nothing
           // left to keep up with, and the card is re-opened to say which —
           // honestly, and because a shut card says nothing at all.
@@ -605,6 +641,8 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       sizes.disconnect()
       offGoTo()
       m.getContainer().removeEventListener('pointerdown', notePointer)
+      window.removeEventListener('pointerup', releasePointer)
+      window.removeEventListener('pointercancel', releasePointer)
       overlay.current?.finalize()
       overlay.current = null
       statics.current = null
@@ -621,6 +659,13 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   // targets with `beforeId`. Repainted layers stay in place, so the overlay
   // never learns the mode changed — and the camera is untouched for free.
   useEffect(() => {
+    // The panels are siblings of the map and never receive the mode, but they
+    // have to match it: the city map is pale and the wireframe is near-black, so
+    // one panel colour cannot sit well on both. Putting it on the document root
+    // lets CSS select on it — no prop-drilling, no store, and no component needs
+    // to know. A third view later would be CSS alone.
+    document.documentElement.dataset.mapMode = mode
+
     const m = map.current
     if (!m || !styleLoaded) return
 
