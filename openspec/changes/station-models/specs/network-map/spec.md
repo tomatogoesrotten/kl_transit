@@ -26,16 +26,29 @@ occluded close up and indistinguishable from the line far away.
 - **WHEN** the camera is close to a station
 - **THEN** what is drawn reads as a station rather than as an abstract marker
 
-### Requirement: What marks a station suits how far away the viewer is
+### Requirement: A station carries the colour of the line it serves
 
-What is drawn for a station SHALL differ with distance: something structural when close enough for
-structure to be legible, and something that carries at a distance when it is not. The change between
-them SHALL be gradual, so neither appears or vanishes abruptly.
+What marks a station SHALL be recognisably the colour of its line, strongly enough to be picked out
+against the map, rather than a darkened shade of it.
 
-#### Scenario: Moving the camera in and out
+Where a place is served by several lines it has no single colour, so it SHALL be marked distinctly
+rather than quietly — a place worth several lines is not a place to be the least visible thing on
+the map.
 
-- **WHEN** the viewer zooms from the whole network down to a single station and back
-- **THEN** what marks the station changes without either representation popping in or out
+#### Scenario: Finding a line's stations
+
+- **WHEN** a viewer scans the map for the stations of one line
+- **THEN** those stations carry that line's colour clearly enough to be picked out from the others
+
+#### Scenario: A line with a dark colour
+
+- **WHEN** a line's colour is a dark one
+- **THEN** its stations are still recognisably that colour rather than reading as near-black
+
+#### Scenario: A place served by several lines
+
+- **WHEN** a place served by several lines is marked
+- **THEN** it is distinct from the single-line places around it, and no less visible than them
 
 ### Requirement: A station tells you which kind of railway it serves
 
@@ -88,6 +101,22 @@ Nothing drawn SHALL imply a precision about height that the data does not contai
 - **WHEN** a station on a section that is in reality underground is drawn
 - **THEN** it is drawn at the same assumed height as the rest, and the explanation of the data still
   says height is not in the feed
+
+### Requirement: A station is easy to select without being large
+
+A station SHALL be easy to point at and select, and that SHALL NOT be achieved by drawing it larger.
+How big a thing looks and how big a target it presents are separate, and a marker sized to be
+clickable is a marker that dominates the map it sits on.
+
+#### Scenario: Selecting a station
+
+- **WHEN** the viewer points near a station and clicks
+- **THEN** it is selected, without their having had to hit it precisely
+
+#### Scenario: Selecting on a touchscreen
+
+- **WHEN** the viewer taps near a station with a finger
+- **THEN** it is selected, with a tolerance suited to a fingertip rather than a pointer
 
 ### Requirement: Station markings do not overwhelm the trains
 

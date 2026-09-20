@@ -4,20 +4,16 @@ import { hexToRgb, stationDots } from './layers'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
 import {
-  BEACON_FADE,
-  BEACON_FLOOR_M,
-  CROWD_M,
-  MODEL_FADE,
   NEUTRAL,
-  beaconHeight,
-  beaconLayer,
-  crossfade,
   STATION_MODEL_URL,
+  placeSelections,
   stationModelLayers,
   stationPlaces,
 } from './places'
 import type { Place } from './places'
-import { MODEL_URL, VIADUCT_M, halfWidth } from './trains'
+import { MODEL_URL, VIADUCT_M, trainLayers } from './trains'
+import type { TrainInstance } from './trains'
+import { distinctSelections, selectionKey } from '../ui/inspect'
 import type { Mode } from '../sim'
 
 const rail = prepare(network)
@@ -172,101 +168,8 @@ describe('what a place is drawn as', () => {
   })
 })
 
-describe('crowding', () => {
-  it('leaves a place on its own at full strength', () => {
-    const alone = places.filter((p) => {
-      return places.every((q) => q === p || metresApart(p.position, q.position) >= CROWD_M)
-    })
-    expect(alone.length).toBeGreaterThan(0)
-    for (const p of alone) expect(p.crowding).toBe(1)
-  })
-
-  it('takes the city centre down, but never to nothing', () => {
-    const crowded = places.filter((p) => p.crowding < 1)
-    expect(crowded.length).toBeGreaterThan(10)
-    for (const p of places) {
-      expect(p.crowding).toBeGreaterThanOrEqual(0.35)
-      expect(p.crowding).toBeLessThanOrEqual(1)
-    }
-  })
-})
-
-describe('the crossfade', () => {
-  // Every tenth of a zoom level from the whole network to a single platform.
-  const sweep = Array.from({ length: 121 }, (_, i) => 8 + i * 0.1).map((z) => ({
-    z,
-    ...crossfade(z),
-  }))
-
-  it('never dips: the two together are always worth at least one', () => {
-    // Two layers at half opacity read as one faint thing, not as a transition.
-    for (const { z, model, beacon } of sweep) {
-      expect(model + beacon, `at zoom ${z}`).toBeGreaterThanOrEqual(1)
-    }
-  })
-
-  it('never has one at nothing while the other is still faint', () => {
-    for (const { z, model, beacon } of sweep) {
-      if (model === 0) expect(beacon, `at zoom ${z}`).toBe(1)
-      if (beacon === 0) expect(model, `at zoom ${z}`).toBe(1)
-    }
-  })
-
-  it('moves one way only, so neither pops in or out', () => {
-    for (let i = 1; i < sweep.length; i++) {
-      expect(sweep[i].model).toBeGreaterThanOrEqual(sweep[i - 1].model)
-      expect(sweep[i].beacon).toBeLessThanOrEqual(sweep[i - 1].beacon)
-    }
-  })
-
-  it('is the beacon far out and the model close in', () => {
-    expect(crossfade(MODEL_FADE[0])).toEqual({ model: 0, beacon: 1 })
-    expect(crossfade(MODEL_FADE[1])).toEqual({ model: 1, beacon: 1 })
-    expect(crossfade(BEACON_FADE[1])).toEqual({ model: 1, beacon: 0 })
-    // And the model is fully up before the beacon starts going down.
-    expect(MODEL_FADE[1]).toBeLessThanOrEqual(BEACON_FADE[0])
-  })
-})
-
-describe('the beacons', () => {
-  it('clears the roofline however close the camera is', () => {
-    for (let z = 8; z <= 20; z += 0.5) {
-      expect(beaconHeight(z, 3.14)).toBeGreaterThanOrEqual(BEACON_FLOOR_M)
-    }
-  })
-
-  it('is sized by the same camera relation the trains are', () => {
-    // Not a second copy of it. Above the floor the height is a multiple of the
-    // train half-width, so a beacon holds its size on screen as the camera
-    // pulls back — which is what makes it readable with the network in view.
-    const far = beaconHeight(11, 3.14)
-    const near = beaconHeight(15.5, 3.14)
-    expect(far).toBeGreaterThan(near)
-    expect(far / halfWidth(11, 3.14)).toBeCloseTo(22, 6)
-  })
-
-  it('does not answer picks, so it never stands in front of a train', () => {
-    const layer = beaconLayer(places, 8, 400, 1, 'test-label-layer')
-    expect(layer.props.pickable).toBe(false)
-    expect(layer.props.data).toHaveLength(160)
-    expect(layer.props.visible).toBe(true)
-    expect(beaconLayer(places, 8, 400, 0, 'test-label-layer').props.visible).toBe(false)
-  })
-
-  it('fades with the crossfade and with how crowded the place is', () => {
-    const layer = beaconLayer(places, 8, 400, 0.5, 'test-label-layer')
-    expect(layer.props.opacity).toBeCloseTo(0.25, 6)
-    // deck.gl types an accessor as "a value or a function of the datum, an
-    // index and the layer"; ours is a plain function of the datum.
-    const getFillColor = layer.props.getFillColor as unknown as (d: Place) => number[]
-    const crowded = places.reduce((a, b) => (b.crowding < a.crowding ? b : a))
-    expect(getFillColor(crowded)[3]).toBeLessThan(255)
-    expect(getFillColor(crowded).slice(0, 3)).toEqual(crowded.color)
-  })
-})
-
 describe('the station models', () => {
-  const layers = stationModelLayers(places, 8, 1, 'test-label-layer')
+  const layers = stationModelLayers(places, 8, 'test-label-layer')
 
   it('draws one place once, under the model of its own mode', () => {
     expect(layers).toHaveLength(4)
@@ -288,13 +191,67 @@ describe('the station models', () => {
     }
   })
 
-  it('does not answer picks: the rings do, and they know which line', () => {
-    for (const layer of layers) expect(layer.props.pickable).toBe(false)
+  it('answers picks, as a second target beside the four-pixel ring', () => {
+    for (const layer of layers) expect(layer.props.pickable).toBe(true)
   })
 
   it('is scaled by the camera, like the trains, with no pixel floor', () => {
-    expect(stationModelLayers(places, 8, 1, 'x')[0].props.sizeScale).toBe(2)
-    expect(stationModelLayers(places, 40, 1, 'x')[0].props.sizeScale).toBe(10)
+    expect(stationModelLayers(places, 8, 'x')[0].props.sizeScale).toBe(2)
+    expect(stationModelLayers(places, 40, 'x')[0].props.sizeScale).toBe(10)
+  })
+
+  it('is scaled by exactly what a train is scaled by, at every camera', () => {
+    // Not a coincidence worth losing. A train standing at a platform sits in
+    // the gap the two platforms leave open, and it stays in that gap at every
+    // zoom only because the station and the train grow by the same number. Give
+    // the stations a scale of their own and a canopy eventually closes over the
+    // train it is meant to mark — and takes its picks with it.
+    const noTrains: Record<Mode, TrainInstance[]> = { LRT: [], MRT: [], MRL: [], BRT: [] }
+    for (const W of [4, 8, 40, 420]) {
+      expect(stationModelLayers(places, W, 'x')[0].props.sizeScale).toBe(
+        trainLayers(noTrains, W, 'x')[0].props.sizeScale,
+      )
+    }
+  })
+})
+
+describe('what a pick on a model means', () => {
+  it('gives one selection per platform, for the lines that actually call there', () => {
+    for (const p of places) {
+      const picked = placeSelections(p)
+      expect(picked).toHaveLength(membersOf(p).length)
+      expect(picked.map((s) => s.lineId).sort()).toEqual([...p.lines].sort())
+      for (const s of picked) expect(s.kind).toBe('station')
+    }
+  })
+
+  it('is the very thing the ring gives, where one line calls', () => {
+    // So the model and the ring under it are one selection said twice, and the
+    // card opens instead of a chooser asking which of one.
+    const single = places.find((p) => p.lines.length === 1)!
+    const [ring] = membersOf(single)
+    const both = distinctSelections([
+      ...placeSelections(single),
+      { kind: 'station', lineId: ring.line, stopId: ring.id },
+    ])
+    expect(both).toHaveLength(1)
+    expect(selectionKey(both[0])).toBe(`station:${ring.line}:${ring.id}`)
+  })
+
+  it('offers the four at Titiwangsa, and they stay four distinct things', () => {
+    const picked = placeSelections(place('Titiwangsa'))
+    expect(picked).toHaveLength(4)
+    expect(distinctSelections(picked)).toHaveLength(4)
+    expect(new Set(picked.map((s) => s.stopId)).size).toBe(4)
+  })
+
+  it('names a stop the timetable knows, so the card can describe it', () => {
+    for (const p of places) {
+      for (const s of placeSelections(p)) {
+        expect(rail.stations[s.stopId].name).toBe(p.name)
+        expect(rail.lines.some((l) => l.id === s.lineId)).toBe(true)
+      }
+    }
   })
 })
 

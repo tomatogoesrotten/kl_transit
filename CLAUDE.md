@@ -253,9 +253,19 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   per build — see the MapLibre worker note in the stack section. `ls dist/assets | grep worker` must
   list a chunk of roughly half a megabyte.
 - Stations are marked twice over. The per-line RINGS carry which line a platform belongs to and
-  whether a train is standing at it (Milestone 4) and must not be replaced. The MODEL and BEACON are
-  per PLACE — stops grouped by name, 187 into 160 — and say only "a station is here". Four rings at
-  Titiwangsa are correct; four models would be a pile.
+  whether a train is standing at it (Milestone 4) and must not be replaced. The MODEL is per PLACE —
+  stops grouped by name, 187 into 160 — and says only "a station is here". Four rings at Titiwangsa
+  are correct; four models would be a pile.
+- There were beacons too, and they are gone: columns above the roofline, removed because they
+  crowded the city centre and could not be told apart. They also contradicted themselves, fading out
+  at zoom 16.2 while the buildings they existed to see past start at 14.
+- The station palette occupies texture entries 7-11 and the vehicles 0-6, and a test fails the build
+  if a station face samples a vehicle shade. `getColor` MULTIPLIES the texture, so a texel can only
+  darken: a station's darkest face is 52% of the line colour, not 18% as it first was, or the colour
+  a viewer is trying to pick out arrives as mud.
+- Clickability is NOT the model's size. The pick radius is 12 px for fine pointers and 18 for coarse;
+  the rings stay pickable as a second target. Growing the model to make it easier to hit was tried
+  and rejected — the visible marker and the hit target are different things.
 - A place's position comes from its stops' DRAWN positions, computed in the same pass as the station
   dots. Not the feed's coordinates, and not a fresh `pointAt`: either misses the corridor offset and
   the camera-dependent gap, and the marker drifts off the track as the zoom changes.

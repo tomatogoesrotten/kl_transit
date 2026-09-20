@@ -11,11 +11,15 @@ person came to find out.
 
 - **Close: a station model.** A platform structure, varying by mode, so an LRT platform, an MRT
   platform, the monorail's narrow beam station and a BRT stop each look like themselves.
-- **Far: a beacon.** A translucent column in the line's colour rising above the roofline, so
-  stations read instantly at any zoom and from any angle.
-- **A crossfade between them**, so neither pops in.
-- One model and one beacon **per place**, not per line — four models stacked at Titiwangsa would be
-  worse than the four rings already there.
+- One model **per place**, not per line — four models stacked at Titiwangsa would be worse than the
+  four rings already there.
+- The model carries its line's colour strongly enough to be picked out, which is most of what makes
+  a station findable.
+
+**Beacons were built and removed.** Columns above the roofline crowded the city centre and could not
+be told apart, and they contradicted their own purpose: they existed because buildings hide stations,
+yet faded out at zoom 16.2 while buildings start at 14. Recorded here rather than quietly dropped,
+because the idea will occur to someone again.
 
 ## Capabilities
 

@@ -100,8 +100,8 @@ describe('the station layer', () => {
   })
 
   it('fills a marker while a train stands at it, and leaves the rest clear', () => {
-    // Milestone 4's one visible signal, and the station models and beacons
-    // added around it must not take it away. `filled` is a layer-level
+    // Milestone 4's one visible signal, and the station models added around it
+    // must not take it away. `filled` is a layer-level
     // property, so the fill is always drawn and made transparent when idle —
     // an opaque idle fill would punch a hole in the city underneath.
     const dots = stationDots(rail, corridors, GAP)

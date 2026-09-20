@@ -24,13 +24,7 @@ import { arrivalZoom, panelPadding } from './camera'
 import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
-import {
-  beaconHeight,
-  beaconLayer,
-  crossfade,
-  stationModelLayers,
-  stationPlaces,
-} from './places'
+import { placeSelections, stationModelLayers, stationPlaces } from './places'
 import type { Place } from './places'
 import {
   busyStations,
@@ -95,16 +89,26 @@ const hasWebGL2 = document.createElement('canvas').getContext('webgl2') !== null
 const COARSE_POINTER = window.matchMedia?.('(pointer: coarse)').matches ?? false
 const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
-/** Picking radius in pixels. The default is zero, which is an exact pixel hit. */
-const PICK_RADIUS = COARSE_POINTER ? 18 : 8
+/**
+ * Picking radius in pixels. The default is zero, which is an exact pixel hit.
+ *
+ * This, and not the size of the station models, is what makes a station easy to
+ * click. The two were briefly the same lever and it was the wrong one: growing
+ * the models until they were comfortable to hit made the city centre a pile of
+ * furniture. A tolerance costs nothing on screen.
+ */
+const PICK_RADIUS = COARSE_POINTER ? 18 : 12
 
 /**
  * How many things one click may offer between.
  *
  * Four tracks share the corridor at its busiest, and a train standing at a
- * platform covers its own station marker, so six is room to spare.
+ * platform covers its own station marker and the station model around it.
+ * Titiwangsa alone is four rings plus one model, so this has to leave room for
+ * a train behind them — the depth is what stops the trains being cut off the
+ * end of a crowded pick.
  */
-const PICK_DEPTH = 6
+const PICK_DEPTH = 8
 
 const rail = prepare(network)
 // Parsed once, not once per train per frame.
@@ -139,8 +143,8 @@ interface Statics {
   stations: ReturnType<typeof stationLayer>
   /**
    * One entry per named station, however many lines call there — what the
-   * models and the beacons are drawn from. Rebuilt with `dots`, because its
-   * positions come from theirs.
+   * models are drawn from. Rebuilt with `dots`, because its positions come
+   * from theirs.
    */
   places: Place[]
   busyVersion: number
@@ -168,6 +172,8 @@ interface Frame {
 function hoverText(layerId: string | undefined, object: unknown, now: Frame | null): string | null {
   if (!object || !layerId || !now) return null
   if (layerId === 'stations') return rail.stations[(object as StationDot).id]?.name ?? null
+  // A place is already grouped by name, so it carries the one a person uses.
+  if (layerId.startsWith('station-models-')) return (object as Place).name
   if (!layerId.startsWith('trains-')) return null
   // By id, against this frame's own trains: the instance carries an identity
   // and nothing else, so that the renderer holds no references to the
@@ -176,20 +182,25 @@ function hoverText(layerId: string | undefined, object: unknown, now: Frame | nu
   return train ? `${train.line.code} to ${train.dir.to}` : null
 }
 
-/** A pick turned into a selection. Null for empty map, which dismisses the card. */
-function pickToSelection(
-  layerId: string | undefined,
-  object: unknown,
-  now: Frame,
-): Selection | null {
-  if (!object || !layerId) return null
+/**
+ * What one pick means, as selections. Empty for anything that is not a train
+ * or a station, and an empty click dismisses the card.
+ *
+ * A list rather than one selection, because a station model stands for a
+ * PLACE: at Titiwangsa one pick is four platforms on four lines, and a card is
+ * about one of them. A place on a single line gives one selection, which is
+ * the same one its ring gives, so the pair folds back into one.
+ */
+function pickToSelection(layerId: string | undefined, object: unknown, now: Frame): Selection[] {
+  if (!object || !layerId) return []
   if (layerId === 'stations') {
     const dot = object as StationDot
-    return { kind: 'station', lineId: dot.line, stopId: dot.id }
+    return [{ kind: 'station', lineId: dot.line, stopId: dot.id }]
   }
-  if (!layerId.startsWith('trains-')) return null
+  if (layerId.startsWith('station-models-')) return placeSelections(object as Place)
+  if (!layerId.startsWith('trains-')) return []
   const train = now.trains.find((tr) => tr.id === (object as TrainInstance).id)
-  return train ? trainSelection(train, now.t, now.ms) : null
+  return train ? [trainSelection(train, now.t, now.ms)] : []
 }
 
 /** The drawn instance for a train id, or undefined. Not the simulated position — see below. */
@@ -446,7 +457,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
                     radius: PICK_RADIUS,
                     depth: PICK_DEPTH,
                   })
-                  .map((pick) => pickToSelection(pick.layer?.id, pick.object, now)),
+                  // `flatMap`, because one pick on an interchange's model is
+                  // one selection per line calling there.
+                  .flatMap((pick) => pickToSelection(pick.layer?.id, pick.object, now)),
               )
               const view = useView.getState()
               // Two directions run a few pixels apart by design, and four
@@ -646,26 +659,19 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         }
       }
 
-      // Model close, beacon far, and the bands overlap so the sum never dips —
-      // two things at half strength read as one faint thing, not as a
-      // transition. See `crossfade`.
-      const fade = crossfade(zoom)
-
       // Straight to deck.gl, never through React state. The two static layers go
       // back as the same instances; only the trains are new.
       //
-      // Order is draw order. The beacons come last because they are the only
-      // translucent thing here, and translucency blends over what is already
-      // drawn. The station models go UNDER the trains, so that a train standing
-      // at a platform is drawn over its own station rather than into it.
+      // Order is draw order. The station models go BEFORE the trains, so that a
+      // train standing at a platform is drawn over its own station rather than
+      // into it.
       deck.setProps({
         layers: [
           s.lines,
           cam.shared,
           s.stations,
-          ...stationModelLayers(s.places, W, fade.model, s.beforeId),
+          ...stationModelLayers(s.places, W, s.beforeId),
           ...trainLayers(byMode, W, s.beforeId),
-          beaconLayer(s.places, W, beaconHeight(zoom, lat), fade.beacon, s.beforeId),
         ],
       })
     }

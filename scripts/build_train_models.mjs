@@ -60,6 +60,7 @@ const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'map', 'm
 // --------------------------------------------------------------------------
 
 const PALETTE = [
+  // Vehicles.
   [255, 255, 255], // 0 ROOF  - the line colour at full strength
   [223, 226, 231], // 1 BODY  - the sides, a shade off it
   [ 62,  70,  84], // 2 GLASS - the window band, dark and cool
@@ -67,7 +68,12 @@ const PALETTE = [
   [ 46,  48,  52], // 4 UNDER - underframe, and the monorail's beam
   [ 98, 106, 120], // 5 CAB   - the ends, where the windscreen is
   [ 34,  34,  38], // 6 GAP   - the faces either side of a coupling
-  [255, 255, 255], // 7 spare
+  // Stations, and they have a set of their own for the reason below.
+  [255, 255, 255], // 7  S_ROOF  - seen from above: the line colour, exactly
+  [236, 238, 242], // 8  S_SIDE  - the roof's edge and the gable ends
+  [206, 210, 216], // 9  S_DECK  - the platform surface and the wall under the glazing
+  [164, 168, 176], // 10 S_GLASS - the glazed band, the one darker line in it
+  [132, 136, 144], // 11 S_UNDER - soffits and the sides of the deck
 ]
 
 const ROOF = 0
@@ -77,6 +83,24 @@ const SKIRT = 3
 const UNDER = 4
 const CAB = 5
 const GAP = 6
+
+/**
+ * Why the stations are shaded so much lighter than the vehicles.
+ *
+ * A texel MULTIPLIES the line colour, so it can only ever darken: 255 is the
+ * line colour exactly, and the vehicles' 62 is a quarter of it — which on a
+ * dark line like BRT Sunway's `#115740` comes out near-black. A train can
+ * afford that, because a dark window band is part of what makes it read as a
+ * train. A station cannot: it is the thing somebody is trying to pick out of
+ * the city, and the owner's words were "is there a way to make the stations be
+ * the line colour". So a station is drawn almost entirely IN the line colour —
+ * nothing below about half strength — with one darker band for structure.
+ */
+const S_ROOF = 7
+const S_SIDE = 8
+const S_DECK = 9
+const S_GLASS = 10
+const S_UNDER = 11
 
 /**
  * The horizontal bands every vehicle is built from, bottom to top.
@@ -289,32 +313,35 @@ function station({
   for (const side of [1, -1]) {
     const y0 = side > 0 ? inner : -hw
     const y1 = side > 0 ? hw : -inner
-    // The deck: dark at the edges, lighter on top where people stand.
-    cuboid(m, x0, x1, y0, y1, 0, deck, UNDER, SKIRT)
+    // The deck: a shade down at the edges, the line colour on top where people
+    // stand.
+    cuboid(m, x0, x1, y0, y1, 0, deck, S_UNDER, S_DECK)
     if (wall) {
       // The outer wall, in two bands. At the size a station is drawn — about
-      // thirty pixels long — a glazed band is a line of colour, and a line of
-      // colour is the most detail that survives.
+      // twenty pixels long — a glazed band is a line across it, and a line
+      // across it is the most detail that survives.
       const wy0 = side > 0 ? hw - 0.7 : -hw
       const wy1 = side > 0 ? hw : -hw + 0.7
       const sill = deck + (roof - deck) * 0.45
-      cuboid(m, x0, x1, wy0, wy1, deck, sill, SKIRT)
-      cuboid(m, x0, x1, wy0, wy1, sill, roof, GLASS)
+      cuboid(m, x0, x1, wy0, wy1, deck, sill, S_DECK)
+      cuboid(m, x0, x1, wy0, wy1, sill, roof, S_GLASS)
     }
-    // The roof: the line colour from above, dark from underneath.
-    cuboid(m, r0, r1, y0, y1, roof, height, BODY, ROOF, UNDER)
+    // The roof: the line colour exactly from above, a shade down underneath.
+    cuboid(m, r0, r1, y0, y1, roof, height, S_SIDE, S_ROOF, S_UNDER)
   }
 
   // End frames, which is what makes an MRT station read as one enclosed box
   // rather than as two platforms that happen to be side by side.
   if (gables) {
-    cuboid(m, x0, x0 + 1.6, -hw, hw, deck, height, BODY, ROOF, UNDER)
-    cuboid(m, x1 - 1.6, x1, -hw, hw, deck, height, BODY, ROOF, UNDER)
+    cuboid(m, x0, x0 + 1.4, -hw, hw, deck, height, S_SIDE, S_ROOF, S_UNDER)
+    cuboid(m, x1 - 1.4, x1, -hw, hw, deck, height, S_SIDE, S_ROOF, S_UNDER)
   }
 
   // The monorail's beam, carried through the station the way its trains carry
-  // it, so the two line up instead of the train appearing to float.
-  if (beam) cuboid(m, x0, x1, -beam, beam, 0, deck * 1.5, UNDER)
+  // it, so the two line up instead of the train appearing to float. It runs the
+  // full length while the canopy covers only the middle, which is most of what
+  // tells a monorail halt from an MRT box at twenty pixels.
+  if (beam) cuboid(m, x0, x1, -beam, beam, 0, deck * 1.5, S_UNDER)
 
   return m
 }
@@ -329,11 +356,31 @@ function station({
 // is half what the boxes they replace held.
 // --------------------------------------------------------------------------
 
-// A station is roughly twice the length of the train that stops at it and four
+// A station is about a third longer than the train that stops at it and three
 // times its width. A real platform is 150 m by 10 m — fifteen to one — which at
-// the zoom a station model is drawn is a sliver one pixel across. The
-// exaggeration is two to one instead, and it is deliberate: what survives at
-// thirty pixels is the footprint and the colour of the roof, nothing finer.
+// the zoom a station model is drawn is a sliver one pixel across. Some
+// exaggeration of width is unavoidable; this is as little as the shape allows.
+//
+// SIZE. An LRT station is 26 m long, which the layer draws at about 20 px
+// however far away the camera is (length x 3.05 / 4 — see `halfWidth`). The
+// first pass was 34 m, or 26 px, and the owner looked at it and said it was too
+// big and crowded the city centre. Clicking does NOT depend on this any more:
+// the rings are still pickable, and the pick radius in MapView is what makes a
+// station easy to hit. So this number is free to be chosen by eye — which is
+// the only way it can be chosen.
+//
+// WIDTH IS NOT FREE, and this is the trap. `inner` has to clear a train
+// standing at the platform, so the gap between the platforms cannot shrink; a
+// narrower station is a station with shallower platforms, not a narrower gap.
+// And the canopy clears the train only because of the ratio between its height
+// and its width: the line of sight rises 0.58 m per metre outwards at the
+// steepest tilt the map allows, so
+//
+//     train height + 0.58 x (half-width - train edge) < roof
+//
+// must hold, or the near canopy covers the very train it stands over. It holds
+// for all four below with a little to spare. Widen one and the roof has to come
+// up with it.
 //
 // The four LRT lines mean the LRT station is seen four times as often as any
 // other, so it is the one the proportions were chosen for; MRT is the same
@@ -345,23 +392,37 @@ const MODELS = {
   mrt: () => train({ length: 22.4, width: 5.2, height: 4.0, cars: 4, gap: 0.36 }),
   mrl: () => monorail({ length: 12.0, width: 3.2, height: 3.6, cars: 2, gap: 0.28 }),
   brt: () => bus({ length: 10.4, width: 3.2, height: 3.2 }),
+  // Open in the middle, walled along the outside, ends left open.
   'station-lrt': () =>
-    station({ length: 34, width: 18, height: 7.2, inner: 5.6, deck: 1.0, roof: 6.4, wall: true }),
+    station({ length: 26, width: 15, height: 6.0, inner: 5.6, deck: 0.9, roof: 5.4, wall: true }),
+  // The same structure, longer and closed at both ends: one solid box.
   'station-mrt': () =>
     station({
-      length: 38,
-      width: 20,
-      height: 8.4,
+      length: 29,
+      width: 17,
+      height: 6.8,
       inner: 6.2,
-      deck: 1.1,
-      roof: 7.4,
+      deck: 1.0,
+      roof: 6.1,
       wall: true,
       gables: true,
     }),
+  // Narrow, unwalled, and its beam runs out past both ends of the canopy —
+  // which is the silhouette that says monorail at twenty pixels.
   'station-mrl': () =>
-    station({ length: 26, width: 14, height: 6.0, inner: 4.9, deck: 0.9, roof: 5.4, beam: 0.42 }),
+    station({
+      length: 20,
+      width: 12,
+      height: 5.1,
+      inner: 4.9,
+      deck: 0.8,
+      roof: 4.5,
+      span: 0.72,
+      beam: 0.42,
+    }),
+  // A shelter over the middle of its platforms, and nothing else.
   'station-brt': () =>
-    station({ length: 18, width: 13, height: 5.0, inner: 4.9, deck: 0.8, roof: 4.4, span: 0.5 }),
+    station({ length: 14, width: 12.5, height: 4.8, inner: 4.9, deck: 0.7, roof: 4.3, span: 0.5 }),
 }
 
 // --------------------------------------------------------------------------
