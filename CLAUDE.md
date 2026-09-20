@@ -58,9 +58,18 @@ Conventions:
 - Vitest for tests
 - Python 3 (pandas, numpy) only for `scripts/build_network_json.py`
 - Library APIs move. Check the installed version's docs before using MapLibre or deck.gl APIs from memory.
-- `maplibre-gl` is in `optimizeDeps.exclude`. It spawns its tile worker from a URL relative to its
-  own module, and Vite's dep optimizer moves the module without the worker, so the worker 404s and
-  the map renders its background colour and nothing else. Don't remove it. See issue #10.
+- MapLibre's tile worker needs TWO separate fixes, one per build. Remove either and the map paints
+  the style's background colour and nothing else, with NO error anywhere — the style, the sprite and
+  the tile index all load fine, so it looks like a broken map with a clean console. MapLibre parses
+  every vector tile in that worker.
+  - DEV: `maplibre-gl` is in `optimizeDeps.exclude`. The dep optimizer would move the module away
+    from the worker sitting beside it. See issue #10.
+  - BUILD: `setWorkerUrl()` is called with a `?worker&url` import, and `worker.format` is `'es'` in
+    the Vite config because MapLibre constructs it with `{ type: 'module' }`. MapLibre picks its
+    worker file by name at runtime — production or development build — so the name never appears as
+    something a bundler can follow and Vite emits nothing. See issue #32.
+  - The check that catches this: `ls dist/assets | grep worker` must list a worker chunk of roughly
+    half a megabyte. It bundles a shared chunk, so a small file means it was copied, not bundled.
 
 ## Commands
 
