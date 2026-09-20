@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import network from '../data/network.json'
 import { MapView } from './map/MapView'
 import { Card, Chooser, FollowTag } from './ui/Card'
+import { Guide } from './ui/Guide'
 import { LinesPanel } from './ui/LinesPanel'
 import { TimeBar } from './ui/TimeBar'
 
@@ -14,6 +15,10 @@ export function App() {
   // keyboard operation, the focus ring and the screen-reader announcement come
   // from the browser.
   const [about, setAbout] = useState(true)
+  // The guide's own <dialog>, so the caption below can open it again. Held here
+  // rather than as a second piece of state: `showModal()` is the browser's, and
+  // a boolean mirroring whether a dialog is open is a boolean that can be wrong.
+  const guide = useRef<HTMLDialogElement>(null)
 
   return (
     <>
@@ -41,6 +46,12 @@ export function App() {
           Rail has no live position feed, so this shows where trains are scheduled to be, not
           where they are.
         </span>
+        {/* The way back into the guide, which is otherwise shown once and never
+            again. A guide nobody can see twice is a guide nobody can recommend. */}
+        <button className="guide-link" onClick={() => guide.current?.showModal()}>
+          How to use this map
+        </button>
+
         {/* Everything below is something a viewer could otherwise reasonably read
             as a defect: a train through a building, an empty map at half past six,
             KL Sentral appearing more than once. Each was found while building this,
@@ -106,6 +117,11 @@ export function App() {
         <LinesPanel />
         <TimeBar />
       </div>
+
+      {/* Last, and outside the column: a modal <dialog> lives in the browser's
+          top layer, so where it sits in the document does not affect what it
+          covers. It opens from an effect, after the map has been told to load. */}
+      <Guide ref={guide} />
     </>
   )
 }

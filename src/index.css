@@ -4,10 +4,113 @@
    top of the line name. Both of those shipped. */
 *, *::before, *::after { box-sizing: border-box; }
 
+/* ---------------------------------------------------------------------------
+   The two palettes.
+
+   The two map views are opposite backdrops: the city map is near-white, the
+   wireframe is near-black. One panel colour cannot sit on both, so there are
+   two — light frosted glass over the city, dark smoked glass over the
+   wireframe — and every panel below is written in these variables rather than
+   in literal colours.
+
+   The view reaches CSS through `data-map-mode` on <html>, which `MapView`
+   already sets. The panels are siblings of the map and never receive the mode
+   as a prop, so this replaces prop-drilling or a second store with one
+   attribute and a selector. A third view later would be CSS only.
+
+   Defaults are the city palette: before React mounts there is no attribute,
+   and city is also what `readMode()` falls back to.
+   --------------------------------------------------------------------------- */
+:root {
+  /* Frosted: a near-white fill, blurred, over the pale city map. */
+  --glass: rgba(252, 253, 255, 0.74);
+  --glass-strong: rgba(252, 253, 255, 0.86);
+  /* For the two surfaces that are NOT blurred (see `--blur` below). */
+  --solid: rgba(250, 251, 253, 0.97);
+  --edge: rgba(21, 32, 43, 0.14);
+
+  /* Near-black text. Over the glass this is ~14:1, and even over the darkest
+     thing the city map draws (a park, water) it stays above 8:1. */
+  --fg: #15202b;
+  --fg-dim: #4a5661;
+  --fg-faint: #616c77;
+  --rule: rgba(21, 32, 43, 0.16);
+  --hover: rgba(21, 32, 43, 0.12);
+
+  /* Ordinary buttons: a tinted chip carrying near-black text. Pressed inverts
+     to a filled dark chip, because over pale glass a light fill is no fill. */
+  --btn-bg: rgba(21, 32, 43, 0.10);
+  --btn-bg-hover: rgba(21, 32, 43, 0.18);
+  --btn-fg: var(--fg);
+  --btn-on-bg: #15202b;
+  --btn-on-fg: #f4f6f8;
+
+  /* The card's action — see `.card .btn`. Filled DARK here: the card sits on
+     pale glass over a pale map, which is exactly where #34's light-filled
+     button would disappear. */
+  --action-bg: #15202b;
+  --action-fg: #f4f6f8;
+  --action-hover: #27384a;
+
+  --focus: #1a56c4;
+  --warn: #8a4b00;
+  --void: #e9ecef;
+
+  /* One blur, named once. Raising or lowering the frost is a single edit, and
+     dropping a panel out of the frosted set below is how to buy frames back. */
+  --blur: blur(10px) saturate(140%);
+}
+
+:root[data-map-mode="wireframe"] {
+  /* Smoked: a near-black fill over the wireframe's near-black city. */
+  --glass: rgba(14, 16, 20, 0.66);
+  --glass-strong: rgba(14, 16, 20, 0.82);
+  --solid: rgba(14, 16, 20, 0.95);
+  --edge: rgba(255, 255, 255, 0.15);
+
+  --fg: #eef1f4;
+  --fg-dim: #aab2bb;
+  --fg-faint: #8b939c;
+  --rule: rgba(255, 255, 255, 0.16);
+  --hover: rgba(255, 255, 255, 0.14);
+
+  --btn-bg: rgba(255, 255, 255, 0.14);
+  --btn-bg-hover: rgba(255, 255, 255, 0.24);
+  --btn-fg: var(--fg);
+  --btn-on-bg: #eef1f4;
+  --btn-on-fg: #111;
+
+  /* Filled LIGHT here, the other way up: over smoked glass a dark fill is the
+     one that vanishes. This is the pair #34 was only ever half of. */
+  --action-bg: #f0f2f4;
+  --action-fg: #15202b;
+  --action-hover: #ffffff;
+
+  --focus: #8ab4ff;
+  --warn: #ffd79a;
+  --void: #0b0d10;
+}
+
 /* The map fills the window; nothing here is a document to scroll. A page that
    can scroll hides a layout fault instead of showing it. */
 html, body, #root { height: 100%; margin: 0; overflow: hidden; }
-body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
+body { font: 14px/1.4 system-ui, sans-serif; background: var(--void); color: var(--fg); }
+
+/* Every frosted surface, in one rule.
+   `backdrop-filter` is not cheap: the compositor re-reads the backdrop behind
+   each of these on every frame the map paints, and the map paints at 60fps.
+   So the set is deliberately small and deliberately here, where it can be seen
+   and cut. `.tip` and `.guide` are NOT in it: the tip moves with the pointer,
+   which is the worst case of all, and the guide is a full-screen modal. Both
+   use `--solid` instead. */
+.caption, .mode-switch, .timebar, .lines, .card, .following, .chooser {
+  background: var(--glass);
+  border: 1px solid var(--edge);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+/* The three that carry detail worth reading get a denser fill. */
+.card, .chooser { background: var(--glass-strong); }
 
 /* What this is and what it is honestly claiming. A native <details>, so it
    collapses to the information mark alone when it is in the way.
@@ -19,7 +122,6 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
   position: absolute; left: 10px; top: 10px; z-index: 1;
   max-width: min(34ch, calc(100vw - 20px));
   padding: 8px 12px; border-radius: 8px;
-  background: rgba(17, 17, 17, 0.8); backdrop-filter: blur(4px);
   pointer-events: none;
 }
 .caption > summary {
@@ -28,16 +130,33 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
   pointer-events: auto;
 }
 .caption > summary::-webkit-details-marker { display: none; }
-.caption > summary:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.caption > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .caption .i {
   display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
-  width: 20px; height: 20px; border: 1px solid #999; border-radius: 50%;
-  color: #ddd; font: italic 700 12px/1 Georgia, serif;
+  width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%;
+  color: var(--fg-dim); font: italic 700 12px/1 Georgia, serif;
 }
 /* Collapsed: the mark, and nothing else. */
 .caption:not([open]) { padding: 6px; }
 .caption:not([open]) strong { display: none; }
-.caption span { display: block; margin-top: 4px; color: #aaa; font-size: 12px; }
+.caption span { display: block; margin-top: 4px; color: var(--fg-dim); font-size: 12px; }
+
+/* The way back into the guide. A closed <details> hides everything but its
+   summary, so this is here rather than beside the information mark: the caption
+   is open on a first sight, which is when somebody might want it, and folding
+   the caption away folds this away too.
+
+   `pointer-events: auto` for the same reason the summaries have it — the panel
+   itself is a hole for the map to be dragged through. */
+.caption .guide-link {
+  display: block; margin-top: 10px; padding: 0;
+  border: 0; background: none; color: var(--fg-dim);
+  font: inherit; font-size: 12px; cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 3px;
+  pointer-events: auto;
+}
+.caption .guide-link:hover { color: var(--fg); }
+.caption .guide-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* "What this data does not know", nested inside the caption. Another native
    <details>, so it costs no state and the browser handles the keyboard.
@@ -47,20 +166,20 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
    of the map be a panel for as long as it is showing, and closing it gives the
    map straight back. */
 .caption .limits > summary {
-  margin-top: 6px; color: #ccc; font-size: 12px;
+  margin-top: 6px; color: var(--fg-dim); font-size: 12px;
   cursor: pointer; list-style: none; user-select: none;
   text-decoration: underline dotted; text-underline-offset: 3px;
   pointer-events: auto;
 }
 .caption .limits > summary::-webkit-details-marker { display: none; }
-.caption .limits > summary:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.caption .limits > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* Capped and scrollable: on a short screen the list is taller than the space
    above the panels, and the caption has no business covering them. */
 .caption .limits[open] { pointer-events: auto; max-height: 50vh; overflow: auto; }
 .caption .limits ul { margin: 6px 0 0; padding-left: 16px; }
-.caption .limits li { margin-top: 6px; color: #aaa; font-size: 12px; }
-.caption .limits strong { color: #ddd; font-weight: 600; }
-.caption .credit { margin: 10px 0 0; color: #888; font-size: 11px; }
+.caption .limits li { margin-top: 6px; color: var(--fg-dim); font-size: 12px; }
+.caption .limits strong { color: var(--fg); font-weight: 600; }
+.caption .credit { margin: 10px 0 0; color: var(--fg-faint); font-size: 11px; }
 
 /* Below MapLibre's navigation control (three 29px buttons, 10px in from the top
    right), so the two never overlap — nor the caption, which is top left. */
@@ -68,19 +187,20 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
   position: absolute; right: 10px; top: 110px; z-index: 1;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px; border-radius: 8px;
-  background: rgba(17, 17, 17, 0.8); backdrop-filter: blur(4px);
   font-size: 13px; cursor: pointer; user-select: none;
 }
-.mode-switch input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.mode-switch input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--fg); }
+.mode-switch input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* Top centre, and above everything: the bottom belongs to the time bar now, and
    this one fires when the network cannot be drawn at all — it should not end up
-   stacked underneath the controls. */
+   stacked underneath the controls. Deliberately NOT glass: it is the one panel
+   that must be legible whatever is behind it. */
 .notice {
   position: absolute; left: 10px; right: 10px; top: 10px; z-index: 2;
   max-width: 28em; margin: 0 auto;
   padding: 8px 12px; border-radius: 8px;
-  background: rgba(120, 30, 30, 0.9); color: #fff;
+  background: rgba(120, 30, 30, 0.95); color: #fff;
 }
 
 /* The bottom-left column: the card (at phone width), the lines panel, and the
@@ -134,13 +254,15 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
   border-radius: 8px;
   cursor: pointer; list-style: none; user-select: none;
 }
-.controls > summary:hover { background: rgba(255, 255, 255, 0.06); }
+.controls > summary:hover { background: var(--hover); }
 .controls[open] > summary { margin-bottom: 0; }
 .controls > summary::-webkit-details-marker { display: none; }
 /* A caret that turns, drawn after the clock so it never moves when the clock
-   text changes width. */
+   text changes width. Written as a CSS escape rather than the character itself:
+   the literal one was in this file as a stray control byte, and rendered as the
+   text "B8" beside the clock. */
 .controls > summary::after {
-  content: 'B8'; margin-left: auto; color: #aaa;
+  content: '\25B8'; margin-left: auto; color: var(--fg-dim);
   transition: transform 0.15s;
 }
 .controls[open] > summary::after { transform: rotate(90deg); }
@@ -153,33 +275,32 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
   align-self: stretch;
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
   padding: var(--bar-pad-y) var(--bar-pad-x); border-radius: 8px;
-  background: rgba(17, 17, 17, 0.8); backdrop-filter: blur(4px);
 }
 .timebar .clock { flex: 0 0 auto; }
 .timebar time {
   display: block; font-size: 24px; font-weight: 600; line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
-.timebar .dim { color: #aaa; font-size: 12px; }
+.timebar .dim { color: var(--fg-dim); font-size: 12px; }
 .timebar .scrub { flex: 1 1 220px; min-width: 130px; }
 .timebar input[type="range"] {
-  display: block; width: 100%; height: 22px; margin: 0; accent-color: #eee;
+  display: block; width: 100%; height: 22px; margin: 0; accent-color: var(--fg);
 }
 .timebar .ticks {
   display: flex; justify-content: space-between;
-  color: #888; font-size: 11px; font-variant-numeric: tabular-nums;
+  color: var(--fg-faint); font-size: 11px; font-variant-numeric: tabular-nums;
 }
 .timebar .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .btn {
   padding: 7px 12px; border: 0; border-radius: 6px;
-  background: #2b2b2b; color: #eee;
+  background: var(--btn-bg); color: var(--btn-fg);
   font: inherit; font-size: 13px; font-weight: 600;
   white-space: nowrap; cursor: pointer;
 }
-.btn:hover { background: #3a3a3a; }
-.btn[aria-pressed="true"] { background: #eee; color: #111; }
-.btn:focus-visible, .timebar input:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.btn:hover { background: var(--btn-bg-hover); }
+.btn[aria-pressed="true"] { background: var(--btn-on-bg); color: var(--btn-on-fg); }
+.btn:focus-visible, .timebar input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .seg { display: inline-flex; }
 .seg .btn { border-radius: 0; }
 .seg .btn:first-child { border-radius: 6px 0 0 6px; }
@@ -191,7 +312,7 @@ select.btn { padding: 7px 8px; }
 .no-trains {
   flex: 1 1 100%; margin: 0;
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-  color: #ffd79a; font-size: 13px;
+  color: var(--warn); font-size: 13px; font-weight: 600;
 }
 .no-trains[hidden] { display: none; }
 
@@ -200,14 +321,14 @@ select.btn { padding: 7px 8px; }
    TimeBar both give in their headers. */
 .lines {
   width: min(300px, 100%); max-height: 46vh; overflow: auto;
-  border-radius: 8px; background: rgba(17, 17, 17, 0.85); backdrop-filter: blur(4px);
+  border-radius: 8px;
 }
 .lines > summary {
   padding: 9px 12px; font-weight: 600; cursor: pointer;
   list-style: none; user-select: none;
 }
 .lines > summary::-webkit-details-marker { display: none; }
-.lines .dim { color: #aaa; font-size: 12px; font-weight: 400; }
+.lines .dim { color: var(--fg-dim); font-size: 12px; font-weight: 400; }
 .line-list { list-style: none; margin: 0; padding: 0 8px 8px; }
 .line-list label {
   /* `auto` for the pill, not a fixed width: the track then sizes to the widest
@@ -217,14 +338,14 @@ select.btn { padding: 7px 8px; }
   align-items: center; gap: 8px;
   padding: 4px 6px; border-radius: 6px; cursor: pointer;
 }
-.line-list label:hover { background: #2b2b2b; }
-.line-list input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.line-list label:hover { background: var(--hover); }
+.line-list input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--fg); }
 /* A hidden line stays readable, just plainly off. */
 .line-list input:not(:checked) ~ * { opacity: 0.45; }
 /* `1fr` is still `min-width: auto` inside a grid, so the name column will not
    shrink below the longest line name without this. */
 .line-name { min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
-.n { font-size: 12px; color: #aaa; font-variant-numeric: tabular-nums; }
+.n { font-size: 12px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
 .pill {
   display: inline-block; min-width: 46px; padding: 3px 5px; border-radius: 4px;
   text-align: center; font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
@@ -232,21 +353,21 @@ select.btn { padding: 7px 8px; }
 /* The keyboard route onto the map: a canvas cannot be tabbed through, so the
    stations are real buttons in a list that has to exist anyway. */
 .stops { margin: 0 0 4px 30px; }
-.stops > summary { padding: 2px 0; color: #aaa; font-size: 12px; cursor: pointer; }
+.stops > summary { padding: 2px 0; color: var(--fg-dim); font-size: 12px; cursor: pointer; }
 .stops ul { list-style: none; margin: 0; padding: 2px 0; }
 .stop {
   display: block; width: 100%; padding: 4px 6px; text-align: left;
-  border: 0; border-radius: 4px; background: transparent; color: #eee;
+  border: 0; border-radius: 4px; background: transparent; color: var(--fg);
   font: inherit; font-size: 13px; cursor: pointer;
   /* "Bandar Tun Hussein Onn" in a 300 px column, and a button will not wrap by
      itself. `anywhere` rather than `break-word` because only `anywhere` lets
      the panel measure itself narrower than its longest word. */
   overflow-wrap: anywhere;
 }
-.stop:hover { background: #2b2b2b; }
-.stop:disabled { color: #777; cursor: default; }
+.stop:hover { background: var(--hover); }
+.stop:disabled { color: var(--fg-faint); cursor: default; }
 .stop:focus-visible, .lines summary:focus-visible, .line-list input:focus-visible {
-  outline: 2px solid #8ab4ff; outline-offset: 2px;
+  outline: 2px solid var(--focus); outline-offset: 2px;
 }
 
 /* The card. In the column at phone width; lifted out to the right below the
@@ -254,58 +375,61 @@ select.btn { padding: 7px 8px; }
 .card {
   position: relative; width: 100%; max-height: 40vh; overflow: auto;
   padding: 12px 14px; border-radius: 8px;
-  background: rgba(17, 17, 17, 0.88); backdrop-filter: blur(4px);
 }
 .card h2 { margin: 6px 0 0; font-size: 18px; line-height: 1.15; }
-.card .sub { margin: 2px 0 0; color: #aaa; font-size: 12px; }
+.card .sub { margin: 2px 0 0; color: var(--fg-dim); font-size: 12px; }
 /* Station names are long and the card is narrow on a phone. See `.stop`. */
 .card h2, .card .sub, .card td { overflow-wrap: anywhere; }
 .card .status { margin: 9px 0 0; font-weight: 600; }
 .card table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 13px; }
-.card th { padding: 9px 0 3px; text-align: left; color: #aaa; font-size: 12px; font-weight: 600; }
-.card td { padding: 4px 0; border-top: 1px solid #333; }
+.card th { padding: 9px 0 3px; text-align: left; color: var(--fg-dim); font-size: 12px; font-weight: 600; }
+.card td { padding: 4px 0; border-top: 1px solid var(--rule); }
 .card td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
-.card .sched { margin: 9px 0 0; color: #aaa; font-size: 11px; }
+.card .sched { margin: 9px 0 0; color: var(--fg-dim); font-size: 11px; }
 /* The card's action is the thing most people opened the card for, so it is
-   filled rather than left as the default dark grey. That grey is #2b2b2b
-   against the card's near-black, which is nearly no contrast at all - and the
-   card sits over a light map, so it renders lighter than the time bar does and
-   loses what little there was. It read as plain text, not a button.
+   filled rather than left as the ordinary button tint, which against the card's
+   own fill is nearly no contrast at all. It read as plain text, not a button.
+
+   Which WAY it is filled now depends on the view, because the card is
+   translucent and takes the colour of whatever is behind it: a light fill over
+   the frosted city card is the same disappearing act, the other way up, that
+   #34 fixed for the dark one. So both halves live in `--action-*` and flip
+   together with the palette.
+
    Inverted from the shared rule on purpose: `aria-pressed="true"` normally
    fills a button, which would have made this bright while following and
    invisible while inviting you to follow. Following is a state to leave, not a
    call to action, so it is the calmer of the two. */
 .card .btn {
   margin-top: 8px;
-  background: #f0f2f4; color: #15202b;
+  background: var(--action-bg); color: var(--action-fg);
 }
-.card .btn:hover { background: #fff; }
+.card .btn:hover { background: var(--action-hover); }
 .card .btn[aria-pressed="true"] {
-  background: transparent; color: #eee;
-  box-shadow: inset 0 0 0 1.5px #6b7480;
+  background: transparent; color: var(--fg);
+  box-shadow: inset 0 0 0 1.5px var(--fg-faint);
 }
-.card .btn[aria-pressed="true"]:hover { background: rgba(255, 255, 255, 0.08); }
+.card .btn[aria-pressed="true"]:hover { background: var(--hover); }
 /* The frame loop hides the rows it has nothing for, and the follow button when
    there is no running train to follow. `display` has to be said for a table row. */
 .card [hidden] { display: none; }
 .x {
   position: absolute; right: 6px; top: 6px; width: 28px; height: 28px;
-  border: 0; border-radius: 6px; background: transparent; color: #aaa;
+  border: 0; border-radius: 6px; background: transparent; color: var(--fg-dim);
   font-size: 17px; line-height: 1; cursor: pointer;
 }
-.x:hover { background: #2b2b2b; color: #eee; }
-.x:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.x:hover { background: var(--hover); color: var(--fg); }
+.x:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* The camera is still following a train, and its card is shut. Deliberately one
    short row: the point of shutting the card was to see the train. */
 .following {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px 6px 10px; border-radius: 8px;
-  background: rgba(17, 17, 17, 0.85); backdrop-filter: blur(4px);
   font-size: 13px;
 }
 .following .eye {
-  flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #8ab4ff;
+  flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--focus);
 }
 /* The name gives way before the buttons do: losing the end of a line name is a
    great deal better than losing the way to stop. */
@@ -318,20 +442,52 @@ select.btn { padding: 7px 8px; }
 .chooser {
   width: min(300px, 100%); max-height: 40vh; overflow: auto;
   padding: 8px; border-radius: 8px;
-  background: rgba(17, 17, 17, 0.88); backdrop-filter: blur(4px);
 }
-.chooser p { margin: 0 0 4px; padding: 0 6px; color: #aaa; font-size: 12px; }
+.chooser p { margin: 0 0 4px; padding: 0 6px; color: var(--fg-dim); font-size: 12px; }
 .chooser ul { list-style: none; margin: 0; padding: 0; }
 
 /* The hover description. It follows the pointer, so it is written straight to
-   the DOM — never through React state. */
+   the DOM — never through React state. It is also the one surface that moves
+   across the map continuously, which is the most expensive place a
+   `backdrop-filter` could possibly be, so it is opaque instead of frosted. */
 .tip {
   position: absolute; z-index: 1; pointer-events: none;
   transform: translate(12px, -50%);
   padding: 4px 8px; border-radius: 6px;
-  background: rgba(17, 17, 17, 0.92); font-size: 12px; white-space: nowrap;
+  background: var(--solid); border: 1px solid var(--edge); color: var(--fg);
+  font-size: 12px; white-space: nowrap;
 }
 .tip[hidden] { display: none; }
+
+/* The first-visit guide. A native <dialog> opened with `showModal()`, so the
+   top layer, the backdrop, focus containment and Escape are all the browser's —
+   see `Guide.tsx`.
+
+   Not frosted: it is a full-screen-ish surface over a map still animating
+   behind it, and blurring the backdrop of the whole viewport at 60fps is the
+   one place the cost would actually be felt. A plain scrim, and an opaque
+   panel. */
+.guide {
+  width: min(460px, calc(100vw - 24px));
+  max-height: calc(100vh - 32px);
+  padding: 0; overflow: auto;
+  border: 1px solid var(--edge); border-radius: 12px;
+  background: var(--solid); color: var(--fg);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+.guide::backdrop { background: rgba(8, 10, 14, 0.55); }
+/* The padding belongs to this inner box, not to the dialog. A click on the
+   dialog's own padding would otherwise look exactly like a click on the
+   backdrop, and close the guide from inside it. */
+.guide-body { padding: 20px 22px; }
+.guide h2 { margin: 0; font-size: 20px; line-height: 1.2; }
+.guide .lead { margin: 10px 0 0; color: var(--fg); }
+.guide ul { margin: 12px 0 0; padding-left: 18px; }
+.guide li { margin-top: 8px; color: var(--fg-dim); }
+.guide li strong { color: var(--fg); font-weight: 600; }
+.guide form { margin: 18px 0 0; }
+.guide .btn { padding: 9px 16px; background: var(--action-bg); color: var(--action-fg); }
+.guide .btn:hover { background: var(--action-hover); }
 
 /* Wide enough for two columns: the card leaves the bottom-left column and parks
    under the mode switch, which is itself under MapLibre's navigation control. */
@@ -356,6 +512,8 @@ select.btn { padding: 7px 8px; }
   .card { max-height: 34vh; }
   .chooser { max-height: 30vh; }
   .caption { max-width: calc(100vw - 20px); }
+  .guide-body { padding: 16px 16px 18px; }
+  .guide h2 { font-size: 18px; }
 }
 
 /* A small phone held upright. The clock keeps its own line rather than
@@ -364,4 +522,6 @@ select.btn { padding: 7px 8px; }
   .timebar time { font-size: 17px; }
   .timebar .clock { flex: 1 1 100%; }
   .timebar .scrub { flex: 1 1 100%; }
+  .guide { width: calc(100vw - 16px); }
+  .guide ul { padding-left: 16px; }
 }
