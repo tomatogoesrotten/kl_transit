@@ -221,6 +221,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   // The last camera padding applied, so a one-shot move to a station is framed
   // in the same visible box the follow camera centres in.
   const padding = useRef<PaddingOptions>({ top: 0, right: 0, bottom: 0, left: 0 })
+  // True while the viewer is rotating or tilting. Read by the frame loop, so a
+  // ref rather than state: it changes on pointer events and must not re-render.
+  const steering = useRef({ rotate: false, pitch: false })
 
   useEffect(() => {
     const m = new Map({
@@ -300,6 +303,24 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // deliberately not here — changing how close you are is not taking the map
     // back.
     m.on('dragstart', () => useView.getState().stopFollowing())
+
+    // Rotating and tilting are NOT taking the map back, so they must not stop
+    // following - MapLibre fires `rotatestart` and `pitchstart` for those, never
+    // `dragstart`, so nothing above cancels them.
+    //
+    // But the follow camera writes `jumpTo` every frame, and MapLibre's own
+    // handler applies the gesture to the same transform in the same frame. Two
+    // writers sixty times a second, and the gesture loses. So the camera gets
+    // out of the way while a gesture is running and picks the train up again
+    // afterwards: it drifts off centre during the drag and glides back, which is
+    // right, because it is the viewer's gesture and the camera should not argue
+    // with it mid-drag.
+    const gesturing = { rotate: false, pitch: false }
+    m.on('rotatestart', () => (gesturing.rotate = true))
+    m.on('rotateend', () => (gesturing.rotate = false))
+    m.on('pitchstart', () => (gesturing.pitch = true))
+    m.on('pitchend', () => (gesturing.pitch = false))
+    steering.current = gesturing
 
     // Which kind of pointer is in use, for the hover suppression above. Removed
     // in the cleanup, or React's development double-mount leaves two behind.
@@ -571,7 +592,8 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       if (view.following && view.selection?.kind === 'train') {
         const train = findTrain(shown, view.selection)
         const drawn = train && instanceOf(byMode, train.id)
-        if (drawn) {
+        const steered = steering.current.rotate || steering.current.pitch
+        if (drawn && !steered) {
           // A jump every frame, closing part of the gap — see FOLLOW_MS. The
           // zoom, pitch and bearing are left exactly as the viewer set them.
           const centre = m.getCenter()
@@ -582,7 +604,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
               centre.lat + (drawn.position[1] - centre.lat) * k,
             ],
           })
-        } else {
+        } else if (!drawn) {
           // Its trip ended, or its line was hidden. Either way there is nothing
           // left to keep up with, and the card is re-opened to say which —
           // honestly, and because a shut card says nothing at all.
@@ -621,6 +643,13 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   // targets with `beforeId`. Repainted layers stay in place, so the overlay
   // never learns the mode changed — and the camera is untouched for free.
   useEffect(() => {
+    // The panels are siblings of the map and never receive the mode, but they
+    // have to match it: the city map is pale and the wireframe is near-black, so
+    // one panel colour cannot sit well on both. Putting it on the document root
+    // lets CSS select on it — no prop-drilling, no store, and no component needs
+    // to know. A third view later would be CSS alone.
+    document.documentElement.dataset.mapMode = mode
+
     const m = map.current
     if (!m || !styleLoaded) return
 
