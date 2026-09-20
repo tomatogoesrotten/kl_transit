@@ -16,7 +16,7 @@ import { AttributionControl, Map, NavigationControl, setWorkerUrl } from 'maplib
 // `?worker&url` makes Vite bundle the worker properly (it imports from a shared
 // chunk, so copying the file alone would not work) and hand back the hashed URL.
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
-import type { AddLayerObject, PaddingOptions } from 'maplibre-gl'
+import type { PaddingOptions } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
 import { activeTrains, klNow, network, prepare } from '../sim'
 import type { ActiveTrain, KlTime } from '../sim'
@@ -24,7 +24,6 @@ import { arrivalZoom, panelPadding } from './camera'
 import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
-import { stationBuildingLayers } from './stationBuildings'
 import {
   busyStations,
   halfWidth,
@@ -396,27 +395,6 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         beforeId,
       )
 
-      // The stations, drawn as the city's own buildings in the line's colour.
-      // No geometry of ours: these colour the OpenStreetMap buildings that are
-      // already on the map, so a station is the building that is really there.
-      //
-      // After the style's own building layer, which is what makes the tint the
-      // one that shows — see `stationBuildingLayers`. Before `beforeId`, so the
-      // labels still read over the top.
-      //
-      // Deliberately NOT part of the mode snapshot taken above, so `layerOps`
-      // never touches them and they stay lit in both modes. In the wireframe
-      // that is the point: every other building drops to a translucent ghost
-      // and the station buildings are left as the solid, coloured things in it,
-      // which is the same order of brightness the rest of the wireframe keeps.
-      //
-      // `AddLayerObject` types every paint property exactly, and the height and
-      // base in these are copied from whatever the style shipped, so the call
-      // is widened once here rather than the values being cast one by one.
-      for (const layer of stationBuildingLayers(rail, styleLayers.current)) {
-        m.addLayer(layer as AddLayerObject, beforeId)
-      }
-
       if (hasWebGL2) {
         if (!beforeId) {
           console.error(
@@ -493,7 +471,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             camera,
             dots,
             index: stationIndex(dots),
-            stations: stationLayer(dots, beforeId, 0),
+            stations: stationLayer(dots, beforeId, 0, m.getZoom()),
             busyVersion: 0,
             hidden,
           }
@@ -629,7 +607,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       }
       if (changed) {
         s.busyVersion += 1
-        s.stations = stationLayer(s.dots, s.beforeId, s.busyVersion)
+        s.stations = stationLayer(s.dots, s.beforeId, s.busyVersion, m.getZoom())
       }
 
       // `cam.gap` rather than the gap for this frame's camera, so a train is

@@ -118,7 +118,7 @@ function wireframeRule(layer: StyleLayer): Record<string, unknown> | 'hide' | nu
  * ever touches them, and each one is decided on where it is added in `MapView`:
  * the wireframe footprints are switched on and off by hand, and the tinted
  * station buildings are left lit in both modes on purpose — see
- * `stationBuildings.ts`.
+ * our own added layers, which are not in the snapshot.
  */
 export function layerOps(layers: readonly StyleLayer[], mode: MapMode): LayerOp[] {
   return layers.map((layer) => {
