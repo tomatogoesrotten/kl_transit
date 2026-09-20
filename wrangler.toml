@@ -1,6 +1,20 @@
-# Cloudflare Pages reads the output directory from here rather than from the
-# dashboard, so the deploy is defined in the repository and survives the account
-# it was first set up in. The build command stays `npm run build`; the Node
-# version is pinned in .node-version.
-name = "kl-rail"
-pages_build_output_dir = "dist"
+# Cloudflare Workers, serving the built site as static assets.
+#
+# Not Pages: Cloudflare has merged the two, and the Workers flow is what the
+# dashboard now offers. It also suits this project better — GUIDE.md picked
+# Cloudflare so version 2's bus-feed proxy could live "in the same place as a
+# Worker", and on this platform it would be the same Worker, with `main`
+# pointing at a script and these assets served alongside it.
+#
+# The build settings live here rather than only in the dashboard, so the deploy
+# is reviewable and survives the account it was first set up in. Node is pinned
+# in .node-version; the build command is `npm run build`.
+name = "kl-transit"
+compatibility_date = "2026-09-20"
+
+[assets]
+directory = "./dist"
+# There is no client-side router: one page, and every asset it needs is real.
+# So a request for something that does not exist should say so, not silently
+# serve the map.
+not_found_handling = "none"
