@@ -207,5 +207,21 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   `onChange` on an input is the `input` event, so the drag flag is cleared by a NATIVE `change`
   listener attached through a ref; the slider is uncontrolled, or a re-render yanks the thumb out of
   the drag. `KlTime.month` is 1-based where `getUTCMonth()` was 0-based.
-- Next: Milestone 6 in GUIDE.md (select, inspect, follow). The left of the screen above the time bar
-  is deliberately empty for its lines panel.
+- Milestone 6 done: hover, cards, follow and the lines panel, on deck.gl picking. `getCursor` and
+  `pickingRadius` are OVERLAY props, not layer props — without an explicit `getCursor`, deck.gl
+  writes `grab` onto MapLibre's own canvas every frame in interleaved mode and MapLibre's pointer
+  states never appear. Track layers are deliberately NOT pickable: they are everywhere near a line
+  and would answer instead of the train standing on them. `pickingRadius` is Deck-level only, so
+  there is no per-layer radius; trains beat stations by DEPTH, which makes `VIADUCT_M` being above
+  every station marker's elevation load-bearing.
+- A train selection is `{lineId, dir, dep, departedMs}`, NOT the train's `id`. The id embeds the day
+  type and the today/yesterday shift, so midnight and a forced timetable both rename every running
+  train. `departedMs` is an absolute anchor, which `svc + dep` is not: those cannot tell "finished"
+  from "scrubbed back" whenever today and yesterday share a day type — Tuesday to Friday, and always
+  under a forced timetable. When a train cannot be found the app says WHICH of finished, scrubbed-back
+  or lost-to-a-timetable-change it was, and never claims a trip ended when it does not know that.
+- Per-line visibility filters the layers' data and the frame's trains. It must NEVER recompute the
+  shared-track corridors from the visible subset — that would snap 8.5 km of line sideways for a
+  checkbox.
+- Next: Milestone 7 in GUIDE.md (ship it, and keep the data fresh) — issue #27. Note #7 blocks its
+  refresh check, and the golden tests must be separated from the checks that job runs.

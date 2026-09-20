@@ -87,6 +87,91 @@ export const useClock = create<ClockStore>()((set, get) => ({
 }))
 
 /**
+ * What a person has picked out on the map: a train, or a stop on one line.
+ *
+ * A train is NOT held by `ActiveTrain.id`. That string is built from the
+ * service day and which departure of it this is, and both change under the very
+ * same physical train: midnight rolls a departure from today's list into
+ * yesterday's, and forcing a different timetable renames every train on screen.
+ * Line, direction and departure second survive both, and they are unique among
+ * running trains — today's pass only ever holds departures at or before now,
+ * and a trip is far shorter than a day, so yesterday's only holds ones after
+ * it.
+ *
+ * `departedMs` is the honesty half. It is the simulated moment the train left
+ * its origin, which is an absolute anchor: a clock that has run past the end of
+ * the trip means the trip finished, a clock scrubbed back before it means the
+ * train has not left, and neither has to be guessed from a departure second
+ * that repeats every service day.
+ */
+export interface TrainSelection {
+  kind: 'train'
+  lineId: string
+  dir: 0 | 1
+  /** The departure second within its own service day, un-shifted. */
+  dep: number
+  /** When it left its origin, as epoch ms on the simulated clock. */
+  departedMs: number
+}
+
+export interface StationSelection {
+  kind: 'station'
+  lineId: string
+  stopId: string
+}
+
+export type Selection = TrainSelection | StationSelection
+
+export interface ViewStore {
+  selection: Selection | null
+  /** Whether the camera is keeping up with the selected train. */
+  following: boolean
+  /** Line ids the viewer has switched off. Replaced, never mutated - see `toggleLine`. */
+  hidden: ReadonlySet<string>
+
+  select: (selection: Selection | null) => void
+  toggleFollow: () => void
+  stopFollowing: () => void
+  toggleLine: (lineId: string) => void
+}
+
+/**
+ * The things a person changes about what they are looking at.
+ *
+ * Beside the clock rather than inside it: the clock store is documented as how
+ * the clock is behaving, and a selection is not that. Both are read from the
+ * frame loop with `getState()` and neither is subscribed to there.
+ */
+export const useView = create<ViewStore>()((set, get) => ({
+  selection: null,
+  following: false,
+  hidden: new Set<string>(),
+
+  // Selecting something new never inherits the last thing's follow. Following a
+  // train you are no longer looking at is a camera that has run away.
+  select: (selection) => set({ selection, following: false }),
+
+  toggleFollow: () => set({ following: !get().following }),
+
+  // Called from the frame loop when the followed train stops being drawn, so it
+  // must not write when there is nothing to write - see `setTrainsRunning`.
+  stopFollowing: () => {
+    if (get().following) set({ following: false })
+  },
+
+  // A new Set every time, so `cameraLayers` can tell it changed by identity
+  // alone. Hiding the line of the selected thing clears the selection rather
+  // than leaving a card describing something invisible.
+  toggleLine: (lineId) => {
+    const hidden = new Set(get().hidden)
+    if (!hidden.delete(lineId)) hidden.add(lineId)
+    const selection = get().selection
+    const gone = selection !== null && hidden.has(selection.lineId)
+    set(gone ? { hidden, selection: null, following: false } : { hidden })
+  },
+}))
+
+/**
  * Writes the simulated moment.
  *
  * In place, deliberately: `set()` notifies every subscriber, and the frame loop

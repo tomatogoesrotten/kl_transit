@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { klNow } from '../sim'
-import { PEAK_SEC, setMs, useClock } from './store'
+import { PEAK_SEC, setMs, useClock, useView } from './store'
+import type { Selection } from './store'
 
 // A fixed moment to scrub away from: Saturday 20 September 2025, 22:00 in Kuala
 // Lumpur. Late enough that a scrub to the morning peak would cross midnight if
@@ -147,5 +148,63 @@ describe('setTrainsRunning()', () => {
     off()
     expect(listener).toHaveBeenCalledTimes(1)
     expect(state().trainsRunning).toBe(false)
+  })
+})
+
+describe('useView', () => {
+  const view = () => useView.getState()
+  const aTrain: Selection = {
+    kind: 'train',
+    lineId: 'AG',
+    dir: 0,
+    dep: 27000,
+    departedMs: SAT_2200,
+  }
+
+  beforeEach(() => {
+    useView.setState({ selection: null, following: false, hidden: new Set() })
+  })
+
+  it('never carries a follow over to something else', () => {
+    view().select(aTrain)
+    view().toggleFollow()
+    expect(view().following).toBe(true)
+    view().select({ kind: 'station', lineId: 'PH', stopId: 'PH1' })
+    expect(view().following).toBe(false)
+  })
+
+  it('hands out a new Set each time, so a layer can tell by identity', () => {
+    const before = view().hidden
+    view().toggleLine('AG')
+    expect(view().hidden).not.toBe(before)
+    expect(view().hidden.has('AG')).toBe(true)
+    view().toggleLine('AG')
+    expect(view().hidden.has('AG')).toBe(false)
+  })
+
+  it('clears a selection whose line is hidden, including a finished trip', () => {
+    view().select(aTrain)
+    view().toggleFollow()
+    // Hiding some other line leaves it alone...
+    view().toggleLine('PH')
+    expect(view().selection).toEqual(aTrain)
+    // ...and hiding its own line clears it rather than describing something
+    // that is no longer drawn. The line id travels with the selection exactly
+    // so this works for a train whose trip has already ended.
+    view().toggleLine('AG')
+    expect(view().selection).toBeNull()
+    expect(view().following).toBe(false)
+  })
+
+  it('stops following only when it was following', () => {
+    const listener = vi.fn()
+    const off = useView.subscribe(listener)
+    view().stopFollowing()
+    expect(listener).not.toHaveBeenCalled()
+    view().select(aTrain)
+    view().toggleFollow()
+    view().stopFollowing()
+    off()
+    expect(view().following).toBe(false)
   })
 })

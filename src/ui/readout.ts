@@ -1,6 +1,8 @@
 import { firstDeparture, hhmm } from '../sim'
-import type { KlTime, PreparedNetwork } from '../sim'
+import type { ActiveTrain, KlTime, PreparedNetwork } from '../sim'
 import { dateLine, hhmmss, shortDateLine, stateLine } from './format'
+import { cardContent, runningPerLine } from './inspect'
+import type { Selection } from './store'
 import { useClock } from './store'
 
 /**
@@ -59,4 +61,87 @@ export function paintReadout(net: PreparedNetwork, t: KlTime, anyTrains: boolean
     // Nothing to jump to if the timetable never runs.
     if (readout.jump) readout.jump.hidden = first === null
   }
+}
+
+/** How many rows a card's table can hold: five stops ahead, or two directions of three. */
+export const CARD_ROWS = 6
+
+/**
+ * The rest of the interface the frame loop writes to directly: the hover
+ * description, the open card, and the per-line running counts.
+ *
+ * Same bargain as `readout` above, and for the same reason. Hover is the
+ * sharpest case of it — it fires on every pointer movement, so a `setState` per
+ * event would re-render the tree in the middle of a drag. The counts change
+ * four times a second, and the card's status line and table change with the
+ * clock; none of that is something a person did, so none of it is React's.
+ */
+export const panels = {
+  tip: null as HTMLElement | null,
+  pill: null as HTMLElement | null,
+  title: null as HTMLElement | null,
+  sub: null as HTMLElement | null,
+  status: null as HTMLElement | null,
+  table: null as HTMLElement | null,
+  head: null as HTMLElement | null,
+  rows: [] as { row: HTMLElement; label: HTMLElement; value: HTMLElement }[],
+  follow: null as HTMLElement | null,
+  total: null as HTMLElement | null,
+  /** Line id -> the `<span>` its count is written into. */
+  counts: new Map<string, HTMLElement>(),
+}
+
+/** Shows the hover description at a point on the map, or hides it. */
+export function showTip(text: string | null, x: number, y: number) {
+  const tip = panels.tip
+  if (!tip) return
+  tip.hidden = text === null
+  if (text === null) return
+  tip.textContent = text
+  tip.style.left = `${x}px`
+  tip.style.top = `${y}px`
+}
+
+/** The per-line tallies and the network total. Hidden lines still report their trains. */
+export function paintCounts(trains: readonly ActiveTrain[]) {
+  const counts = runningPerLine(trains)
+  for (const [id, el] of panels.counts) el.textContent = String(counts.get(id) ?? 0)
+  if (panels.total) {
+    panels.total.textContent =
+      trains.length === 1 ? '1 train running' : `${trains.length} trains running`
+  }
+}
+
+/**
+ * Fills the open card. The shell — headings, close button, follow button — is
+ * React's; everything that changes as the clock runs is written here.
+ */
+export function paintCard(
+  net: PreparedNetwork,
+  selection: Selection,
+  trains: readonly ActiveTrain[],
+  t: KlTime,
+  ms: number,
+) {
+  const c = cardContent(net, selection, trains, t, ms)
+  if (panels.pill) panels.pill.textContent = c.pill
+  if (panels.title) panels.title.textContent = c.title
+  if (panels.sub) panels.sub.textContent = c.sub
+  if (panels.status) {
+    panels.status.textContent = c.status
+    panels.status.hidden = c.status === ''
+  }
+  if (panels.head) panels.head.textContent = c.head
+  if (panels.table) panels.table.hidden = c.rows.length === 0
+  panels.rows.forEach(({ row, label, value }, i) => {
+    const cells = c.rows[i]
+    row.hidden = cells === undefined
+    if (!cells) return
+    label.textContent = cells[0]
+    value.textContent = cells[1]
+  })
+  // React owns the button's wording and its pressed state, which change only
+  // when a person presses it; the loop owns whether there is anything to
+  // follow, which changes when a trip ends. Different properties, no fight.
+  if (panels.follow) panels.follow.hidden = !c.canFollow
 }

@@ -165,6 +165,15 @@ describe('trainInstances', () => {
     return { line: l, dir: d, at: l.total / 2, dwelling: false, stop: 1, secs: 30, dep: 0, id: 'x' }
   }
 
+  it('carries an identity, so a pick knows which train it hit', () => {
+    // Not the whole ActiveTrain: that record holds references to the line and
+    // the direction, which the renderer would then keep alive for the frame.
+    const [it0] = trainInstances([halfWayAlong(line)], W, colors, corridors, 0).LRT
+    expect(it0.id).toBe('x')
+    expect(it0.lineId).toBe(line.id)
+    expect(Object.keys(it0).sort()).toEqual(['color', 'id', 'lineId', 'orientation', 'position'])
+  })
+
   it('carries the colour of its own line', () => {
     const [it0] = trainInstances([halfWayAlong(line)], W, colors, corridors, 0).LRT
     expect(it0.color).toEqual(colors.get(line.id))
@@ -279,6 +288,16 @@ describe('a train on a shared stretch', () => {
     const withGap = trainInstances([train], W, colors, corridors, GAP).LRT[0]
     const without = trainInstances([train], W, colors, corridors, 0).LRT[0]
     expect(metresApart(withGap.position, without.position)).toBeCloseTo(0, 9)
+  })
+})
+
+describe('trains sit above the platforms they stop at', () => {
+  it('is what makes a standing train win the pick over its own station marker', () => {
+    // Picking is depth-ordered, so this elevation gap is load-bearing and not
+    // decoration: flatten it and picks flicker between a dwelling train and the
+    // platform underneath it.
+    const highest = Math.max(...stationDots(rail, corridors, 0).map((d) => d.position[2]))
+    expect(VIADUCT_M).toBeGreaterThan(highest)
   })
 })
 

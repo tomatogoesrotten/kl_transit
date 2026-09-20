@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Map, NavigationControl } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
 import { activeTrains, klNow, network, prepare } from '../sim'
+import type { ActiveTrain, KlTime } from '../sim'
 import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
@@ -13,11 +14,14 @@ import {
   trainInstances,
   trainLayers,
 } from './trains'
+import type { TrainInstance } from './trains'
 import { FOOTPRINT_LAYER, layerOps, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
 import { ModeSwitch } from '../ui/ModeSwitch'
-import { paintReadout } from '../ui/readout'
-import { setMs, useClock } from '../ui/store'
+import { findTrain, trainSelection } from '../ui/inspect'
+import { paintCard, paintCounts, paintReadout, panels, showTip } from '../ui/readout'
+import type { Selection } from '../ui/store'
+import { setMs, useClock, useView } from '../ui/store'
 
 // The OpenFreeMap "liberty" style already ships a `building-3d` fill-extrusion
 // layer (minzoom 14), so there is nothing for us to add — just zoom in past 14.
@@ -83,6 +87,64 @@ interface Statics {
   index: ReturnType<typeof stationIndex>
   stations: ReturnType<typeof stationLayer>
   busyVersion: number
+  /** The hidden set the layers above were built from. Compared by identity. */
+  hidden: ReadonlySet<string>
+}
+
+/**
+ * How much of the gap to the followed train the camera closes each frame.
+ *
+ * A jump, never `easeTo`: an animation started on every frame is cancelled by
+ * the next one, so it never completes and it emits a movestart/moveend pair
+ * sixty times a second. The smoothing is ours, and it is this one line.
+ */
+const FOLLOW_MS = 220
+
+/** What the pick handlers need from the frame loop. They fire between frames, never inside one. */
+interface Frame {
+  trains: readonly ActiveTrain[]
+  t: KlTime
+  ms: number
+}
+
+/** What is under the pointer, in a few words, or null when it is empty map. */
+function hoverText(layerId: string | undefined, object: unknown, now: Frame | null): string | null {
+  if (!object || !layerId || !now) return null
+  if (layerId === 'stations') return rail.stations[(object as StationDot).id]?.name ?? null
+  if (!layerId.startsWith('trains-')) return null
+  // By id, against this frame's own trains: the instance carries an identity
+  // and nothing else, so that the renderer holds no references to the
+  // simulation's records.
+  const train = now.trains.find((tr) => tr.id === (object as TrainInstance).id)
+  return train ? `${train.line.code} to ${train.dir.to}` : null
+}
+
+/** A pick turned into a selection. Null for empty map, which dismisses the card. */
+function pickToSelection(
+  layerId: string | undefined,
+  object: unknown,
+  now: Frame,
+): Selection | null {
+  if (!object || !layerId) return null
+  if (layerId === 'stations') {
+    const dot = object as StationDot
+    return { kind: 'station', lineId: dot.line, stopId: dot.id }
+  }
+  if (!layerId.startsWith('trains-')) return null
+  const train = now.trains.find((tr) => tr.id === (object as TrainInstance).id)
+  return train ? trainSelection(train, now.t, now.ms) : null
+}
+
+/** The drawn instance for a train id, or undefined. Not the simulated position — see below. */
+function instanceOf(
+  byMode: Record<string, TrainInstance[]>,
+  id: string,
+): TrainInstance | undefined {
+  for (const list of Object.values(byMode)) {
+    const hit = list.find((instance) => instance.id === id)
+    if (hit) return hit
+  }
+  return undefined
 }
 
 export function MapView() {
@@ -100,6 +162,13 @@ export function MapView() {
   const styleLayers = useRef<ReturnType<Map['getStyle']>['layers']>([])
   const [styleLoaded, setStyleLoaded] = useState(false)
   const [mode, setMode] = useState<MapMode>(readMode)
+  // What the frame loop last computed, for the pick handlers to read. They fire
+  // between frames, so they cannot recompute any of it themselves without
+  // disagreeing with what is on the screen.
+  const latest = useRef<{ trains: readonly ActiveTrain[]; t: KlTime; ms: number } | null>(null)
+  // Hover is for pointers that hover. Without this a tap flashes a description
+  // before the card opens, because a browser sends a mousemove before a click.
+  const coarse = useRef(false)
 
   useEffect(() => {
     const m = new Map({
@@ -116,6 +185,32 @@ export function MapView() {
     // A map that fails quietly is how this project shipped three milestones on
     // top of a base map that never drew a single tile. Say something.
     m.on('error', (e) => console.error('maplibre error:', e.error ?? e))
+
+    // Taking the map back stops the camera following a train. `dragstart` is
+    // the signal because MapLibre only fires it for a real interaction and
+    // applies its own click-versus-drag threshold. NOT `move` or `moveend`:
+    // this app's own `jumpTo` fires those sixty times a second while
+    // following, so listening to them would cancel on the first frame. Zoom is
+    // deliberately not here — changing how close you are is not taking the map
+    // back.
+    m.on('dragstart', () => useView.getState().stopFollowing())
+
+    // Which kind of pointer is in use, for the hover suppression above. Removed
+    // in the cleanup, or React's development double-mount leaves two behind.
+    const notePointer = (e: PointerEvent) => {
+      coarse.current = e.pointerType !== 'mouse'
+    }
+    m.getContainer().addEventListener('pointerdown', notePointer)
+
+    // MapLibre already gives its canvas tabindex="0" and its own keyboard
+    // handler, so arrow keys pan and +/- zoom once it has focus. All this does
+    // is say so, where the prototype promised it and implemented nothing.
+    m.getCanvas().setAttribute(
+      'aria-label',
+      'Map of Klang Valley rail lines with trains placed by the timetable. ' +
+        'Arrow keys move the view, plus and minus zoom. ' +
+        'Stations can be selected from the lines panel.',
+    )
 
     m.on('load', () => {
       // Before addControl. deck.gl's interleaved overlay inserts its layers into
@@ -158,18 +253,45 @@ export function MapView() {
           const deck = new MapLibreOverlay({
             interleaved: true,
             onError: (e) => console.error('deck.gl error:', e),
+            // Both of these are properties of the RENDERER, not of a layer.
+            //
+            // The cursor is not polish. In interleaved mode deck.gl draws onto
+            // MapLibre's own canvas, and its default cursor function writes
+            // `grab` there on every frame — so MapLibre's pointer and grabbing
+            // states never appear and the map feels broken for a reason nobody
+            // would guess. Saying it explicitly hands the pointer back.
+            getCursor: ({ isHovering }) => (isHovering ? 'pointer' : 'grab'),
+            // And the radius defaults to zero, which is an exact pixel hit. A
+            // train three kilometres away is a few pixels across; without a
+            // radius it is uncatchable.
+            pickingRadius: 8,
+            onHover: (info) => {
+              if (coarse.current) return showTip(null, 0, 0)
+              showTip(hoverText(info.layer?.id, info.object, latest.current), info.x, info.y)
+            },
+            onClick: (info) => {
+              const now = latest.current
+              if (!now) return
+              useView.getState().select(pickToSelection(info.layer?.id, info.object, now))
+              showTip(null, 0, 0)
+            },
           })
           m.addControl(deck)
           const camera = cameraLayers(rail, CORRIDORS, beforeId)
-          const { dots } = camera(m.getZoom(), m.getCenter().lat)
+          // From the store, not from the default: it is what the loop will
+          // compare against, and starting from a different empty set would
+          // rebuild every layer on the very first frame for nothing.
+          const hidden = useView.getState().hidden
+          const { dots } = camera(m.getZoom(), m.getCenter().lat, hidden)
           statics.current = {
             beforeId,
-            lines: lineLayer(rail, CORRIDORS, beforeId),
+            lines: lineLayer(rail, CORRIDORS, beforeId, hidden),
             camera,
             dots,
             index: stationIndex(dots),
             stations: stationLayer(dots, beforeId, 0),
             busyVersion: 0,
+            hidden,
           }
           overlay.current = deck
         }
@@ -188,6 +310,11 @@ export function MapView() {
     let lastSecond = -1
     let lastPaint = 0
     let lastAny = true
+    // The counts and the open card, on their own quarter-second gate. Painted
+    // out of turn when the selection changes, so a freshly opened card is never
+    // blank while it waits for the next one.
+    let lastPanels = 0
+    let lastSelection: Selection | null = null
     const tick = (now: number) => {
       // Re-armed first, so a throw below costs one frame rather than the whole
       // animation.
@@ -212,6 +339,10 @@ export function MapView() {
       const t = klNow(ms, c.override)
       const trains = activeTrains(rail, t.sec, t.today, t.yesterday)
       const any = trains.length > 0
+      const view = useView.getState()
+      // What the pick handlers read when the pointer moves or something is
+      // clicked, so that a pick always answers about the frame on screen.
+      latest.current = { trains, t, ms }
       // The one thing the loop publishes to React, and it is written only when
       // the answer changes — see the guard inside the action.
       c.setTrainsRunning(any)
@@ -228,6 +359,16 @@ export function MapView() {
         paintReadout(rail, t, any)
       }
 
+      // Counts on every line, the network total, and the open card. Four times
+      // a second: current enough to read, rare enough not to distract, and
+      // never a React render — see `panels` in readout.ts.
+      if (view.selection !== lastSelection || now - lastPanels >= 250) {
+        lastSelection = view.selection
+        lastPanels = now
+        paintCounts(trains)
+        if (view.selection) paintCard(rail, view.selection, trains, t, ms)
+      }
+
       const deck = overlay.current
       const s = statics.current
       if (!deck || !s) return
@@ -236,8 +377,23 @@ export function MapView() {
       const lat = m.getCenter().lat
       const W = halfWidth(zoom, lat)
 
-      // Rebuilt inside only when the zoom changed; the same objects otherwise.
-      const cam = s.camera(zoom, lat)
+      // Hiding a line filters the DATA, never the corridors: those are worked
+      // out once from the whole network, and recomputing them from the visible
+      // subset would snap 8.5 km of line sideways the moment its partner was
+      // switched off — for a checkbox. So the partner of a hidden line stays
+      // drawn beside an alignment it now has to itself. That is a drawing
+      // convention, not a claim about where the rails are.
+      const hidden = view.hidden
+      if (hidden !== s.hidden) {
+        s.hidden = hidden
+        // The lines that share track with nobody are still rebuilt only when
+        // they have to be: the zoom does not move them, but hiding one does.
+        s.lines = lineLayer(rail, CORRIDORS, s.beforeId, hidden)
+      }
+      // Rebuilt inside only when the zoom or the hidden set changed; the same
+      // objects otherwise.
+      const cam = s.camera(zoom, lat, hidden)
+      const shown = hidden.size === 0 ? trains : trains.filter((tr) => !hidden.has(tr.line.id))
 
       let changed = false
       if (cam.dots !== s.dots) {
@@ -251,7 +407,7 @@ export function MapView() {
       // Stations fill while a train stands at them. `dots` is one array mutated
       // in place, so the layer is rebuilt with a new trigger only when the set
       // actually changed — most frames it has not.
-      const busy = busyStations(trains, s.index)
+      const busy = busyStations(shown, s.index)
       for (let i = 0; i < s.dots.length; i++) {
         const on = busy.has(i)
         if (s.dots[i].busy !== on) {
@@ -264,17 +420,40 @@ export function MapView() {
         s.stations = stationLayer(s.dots, s.beforeId, s.busyVersion)
       }
 
+      // `cam.gap` rather than the gap for this frame's camera, so a train is
+      // offset by exactly what its own drawn track was offset by.
+      const byMode = trainInstances(shown, W, COLORS, CORRIDORS, cam.gap)
+
+      // Following. The camera goes to the train's DRAWN position, not to the
+      // one the simulation computed: a train carries its keep-left shift and
+      // its share of the corridor offset, both of which depend on the camera.
+      // Recomputing either here, or using another frame's `W` and `cam.gap`,
+      // puts the camera metres off and drifting as the zoom changes.
+      if (view.following && view.selection?.kind === 'train') {
+        const train = findTrain(shown, view.selection)
+        const drawn = train && instanceOf(byMode, train.id)
+        if (drawn) {
+          // A jump every frame, closing part of the gap — see FOLLOW_MS. The
+          // zoom, pitch and bearing are left exactly as the viewer set them.
+          const centre = m.getCenter()
+          const k = Math.min(1, dt / FOLLOW_MS)
+          m.jumpTo({
+            center: [
+              centre.lng + (drawn.position[0] - centre.lng) * k,
+              centre.lat + (drawn.position[1] - centre.lat) * k,
+            ],
+          })
+        } else {
+          // Its trip ended, or its line was hidden. Either way there is nothing
+          // left to keep up with. The card says which, honestly.
+          view.stopFollowing()
+        }
+      }
+
       // Straight to deck.gl, never through React state. The two static layers go
       // back as the same instances; only the trains are new.
       deck.setProps({
-        layers: [
-          s.lines,
-          cam.shared,
-          s.stations,
-          // `cam.gap` rather than the gap for this frame's camera, so a train
-          // is offset by exactly what its own drawn track was offset by.
-          ...trainLayers(trainInstances(trains, W, COLORS, CORRIDORS, cam.gap), W, s.beforeId),
-        ],
+        layers: [s.lines, cam.shared, s.stations, ...trainLayers(byMode, W, s.beforeId)],
       })
     }
     frame.current = requestAnimationFrame(tick)
@@ -283,6 +462,7 @@ export function MapView() {
       // In the same cleanup as the map, or React's development double-mount
       // leaves two loops racing on one overlay.
       cancelAnimationFrame(frame.current)
+      m.getContainer().removeEventListener('pointerdown', notePointer)
       overlay.current?.finalize()
       overlay.current = null
       statics.current = null
@@ -332,6 +512,16 @@ export function MapView() {
         onChange={(next) => {
           setMode(next)
           saveMode(next)
+        }}
+      />
+      {/* Last, so it is drawn over the panels, and written by the pick handlers
+          through a ref rather than by React: hover fires on every pointer
+          movement, and a setState per event re-renders the tree mid-drag. */}
+      <div
+        className="tip"
+        hidden
+        ref={(el) => {
+          panels.tip = el
         }}
       />
       {!hasWebGL2 && (
