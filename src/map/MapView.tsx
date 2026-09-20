@@ -16,7 +16,7 @@ import { AttributionControl, Map, NavigationControl, setWorkerUrl } from 'maplib
 // `?worker&url` makes Vite bundle the worker properly (it imports from a shared
 // chunk, so copying the file alone would not work) and hand back the hashed URL.
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
-import type { PaddingOptions } from 'maplibre-gl'
+import type { AddLayerObject, PaddingOptions } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
 import { activeTrains, klNow, network, prepare } from '../sim'
 import type { ActiveTrain, KlTime } from '../sim'
@@ -24,8 +24,7 @@ import { arrivalZoom, panelPadding } from './camera'
 import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
-import { placeSelections, stationModelLayers, stationPlaces } from './places'
-import type { Place } from './places'
+import { stationBuildingLayers } from './stationBuildings'
 import {
   busyStations,
   halfWidth,
@@ -141,12 +140,6 @@ interface Statics {
   // and shadows the built-in one for the whole module.
   index: ReturnType<typeof stationIndex>
   stations: ReturnType<typeof stationLayer>
-  /**
-   * One entry per named station, however many lines call there — what the
-   * models are drawn from. Rebuilt with `dots`, because its positions come
-   * from theirs.
-   */
-  places: Place[]
   busyVersion: number
   /** The hidden set the layers above were built from. Compared by identity. */
   hidden: ReadonlySet<string>
@@ -172,8 +165,6 @@ interface Frame {
 function hoverText(layerId: string | undefined, object: unknown, now: Frame | null): string | null {
   if (!object || !layerId || !now) return null
   if (layerId === 'stations') return rail.stations[(object as StationDot).id]?.name ?? null
-  // A place is already grouped by name, so it carries the one a person uses.
-  if (layerId.startsWith('station-models-')) return (object as Place).name
   if (!layerId.startsWith('trains-')) return null
   // By id, against this frame's own trains: the instance carries an identity
   // and nothing else, so that the renderer holds no references to the
@@ -186,10 +177,9 @@ function hoverText(layerId: string | undefined, object: unknown, now: Frame | nu
  * What one pick means, as selections. Empty for anything that is not a train
  * or a station, and an empty click dismisses the card.
  *
- * A list rather than one selection, because a station model stands for a
- * PLACE: at Titiwangsa one pick is four platforms on four lines, and a card is
- * about one of them. A place on a single line gives one selection, which is
- * the same one its ring gives, so the pair folds back into one.
+ * A list rather than one selection, because one click can land on several
+ * things: two directions run a few pixels apart, four tracks share the busiest
+ * corridor, and a train standing at a platform covers its own ring.
  */
 function pickToSelection(layerId: string | undefined, object: unknown, now: Frame): Selection[] {
   if (!object || !layerId) return []
@@ -197,7 +187,6 @@ function pickToSelection(layerId: string | undefined, object: unknown, now: Fram
     const dot = object as StationDot
     return [{ kind: 'station', lineId: dot.line, stopId: dot.id }]
   }
-  if (layerId.startsWith('station-models-')) return placeSelections(object as Place)
   if (!layerId.startsWith('trains-')) return []
   const train = now.trains.find((tr) => tr.id === (object as TrainInstance).id)
   return train ? [trainSelection(train, now.t, now.ms)] : []
@@ -407,6 +396,27 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         beforeId,
       )
 
+      // The stations, drawn as the city's own buildings in the line's colour.
+      // No geometry of ours: these colour the OpenStreetMap buildings that are
+      // already on the map, so a station is the building that is really there.
+      //
+      // After the style's own building layer, which is what makes the tint the
+      // one that shows — see `stationBuildingLayers`. Before `beforeId`, so the
+      // labels still read over the top.
+      //
+      // Deliberately NOT part of the mode snapshot taken above, so `layerOps`
+      // never touches them and they stay lit in both modes. In the wireframe
+      // that is the point: every other building drops to a translucent ghost
+      // and the station buildings are left as the solid, coloured things in it,
+      // which is the same order of brightness the rest of the wireframe keeps.
+      //
+      // `AddLayerObject` types every paint property exactly, and the height and
+      // base in these are copied from whatever the style shipped, so the call
+      // is widened once here rather than the values being cast one by one.
+      for (const layer of stationBuildingLayers(rail, styleLayers.current)) {
+        m.addLayer(layer as AddLayerObject, beforeId)
+      }
+
       if (hasWebGL2) {
         if (!beforeId) {
           console.error(
@@ -484,7 +494,6 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             dots,
             index: stationIndex(dots),
             stations: stationLayer(dots, beforeId, 0),
-            places: stationPlaces(rail, dots),
             busyVersion: 0,
             hidden,
           }
@@ -604,11 +613,6 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         // on all of them — so the loop below has to write it again.
         s.dots = cam.dots
         s.index = stationIndex(cam.dots)
-        // A place sits at the mean of its own platforms' DRAWN positions, so it
-        // is rebuilt exactly when they move and never in between. Here rather
-        // than inside `cameraLayers` only to keep layers.ts and places.ts from
-        // importing each other.
-        s.places = stationPlaces(rail, cam.dots)
         changed = true
       }
 
@@ -662,17 +666,10 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       // Straight to deck.gl, never through React state. The two static layers go
       // back as the same instances; only the trains are new.
       //
-      // Order is draw order. The station models go BEFORE the trains, so that a
-      // train standing at a platform is drawn over its own station rather than
-      // into it.
+      // Order is draw order: the trains go last, so a train standing at a
+      // platform is drawn over its own station marker rather than under it.
       deck.setProps({
-        layers: [
-          s.lines,
-          cam.shared,
-          s.stations,
-          ...stationModelLayers(s.places, W, s.beforeId),
-          ...trainLayers(byMode, W, s.beforeId),
-        ],
+        layers: [s.lines, cam.shared, s.stations, ...trainLayers(byMode, W, s.beforeId)],
       })
     }
     frame.current = requestAnimationFrame(tick)
