@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { network, pointAt, prepare } from '../sim'
-import type { ActiveTrain, PreparedDirection, PreparedLine } from '../sim'
+import type { ActiveTrain, Mode, PreparedDirection, PreparedLine } from '../sim'
 import { stationDots } from './layers'
 import {
   busyStations,
-  footprint,
   halfWidth,
   keepLeft,
   lineColors,
+  MODEL_URL,
   stationIndex,
-  trainShapes,
+  trainInstances,
   VIADUCT_M,
+  yawFor,
 } from './trains'
 
 const rail = prepare(network)
@@ -84,89 +85,125 @@ describe('halfWidth', () => {
   })
 
   it('keeps the train the same size on screen between the two bounds', () => {
-    // The whole point of measuring in multiples of W: a length of 10 W covers
-    // the same number of pixels whatever the zoom — about 30 px — until one of
+    // The whole point of measuring in multiples of W: a length of 5 W covers
+    // the same number of pixels whatever the zoom — about 15 px — until one of
     // the bounds takes over — the cap below zoom 10.2, the floor above 16.9.
+    // 5 W is the LRT model, 20 m at the floor; the boxes this replaced were
+    // 10 W, and the owner asked for half.
     for (const zoom of [11, 12, 13]) {
       const mpp = (156543.03392 * Math.cos((KL.lat * Math.PI) / 180)) / 2 ** zoom
-      expect((halfWidth(zoom, KL.lat) * 10) / mpp).toBeCloseTo(30.5, 6)
+      expect((halfWidth(zoom, KL.lat) * 5) / mpp).toBeCloseTo(15.25, 6)
     }
   })
 })
 
-describe('footprint', () => {
-  const W = 4
-  const box = footprint([KL.lon, KL.lat], 0, W, W * 5, origin, VIADUCT_M)
+describe('yawFor', () => {
+  /**
+   * Where deck.gl sends the model's axes, for pitch = roll = 0.
+   *
+   * Lifted straight out of `calculateTransformMatrix` in the installed
+   * @deck.gl/mesh-layers: column 0 is the image of the model's +X axis and
+   * column 1 the image of its +Y, in a frame where x is east and y is north.
+   * Testing against a copy of the library's own arithmetic is the only way to
+   * pin a convention down; asserting `90 - b` equals `90 - b` would prove
+   * nothing.
+   */
+  function axes(bearingDeg: number) {
+    const yaw = (yawFor(bearingDeg) * Math.PI) / 180
+    return {
+      nose: { east: Math.cos(yaw), north: Math.sin(yaw) },
+      left: { east: -Math.sin(yaw), north: Math.cos(yaw) },
+    }
+  }
 
-  it('is a 2W by 10W rectangle', () => {
-    expect(box).toHaveLength(4)
-    expect(metresApart(box[0], box[1])).toBeCloseTo(2 * W, 6)
-    expect(metresApart(box[1], box[2])).toBeCloseTo(10 * W, 6)
-    expect(metresApart(box[2], box[3])).toBeCloseTo(2 * W, 6)
-    expect(metresApart(box[3], box[0])).toBeCloseTo(10 * W, 6)
+  it('points a northbound train north', () => {
+    const { nose } = axes(0)
+    expect(nose.east).toBeCloseTo(0, 9)
+    expect(nose.north).toBeCloseTo(1, 9)
   })
 
-  it('sits at the height it was given, so it can be extruded from there', () => {
-    for (const corner of box) expect(corner[2]).toBe(VIADUCT_M)
+  it('points an eastbound train east', () => {
+    const { nose } = axes(90)
+    expect(nose.east).toBeCloseTo(1, 9)
+    expect(nose.north).toBeCloseTo(0, 9)
   })
 
-  it('points along the bearing: due north puts both nose corners north', () => {
-    // Corners 0 and 1 are the nose, 2 and 3 the tail.
-    for (const nose of [box[0], box[1]]) expect(offset(KL, nose).north).toBeCloseTo(20, 6)
-    for (const tail of [box[2], box[3]]) expect(offset(KL, tail).north).toBeCloseTo(-20, 6)
-    // And the width is across the track, half each side.
-    expect(offset(KL, box[0]).east).toBeCloseTo(4, 6)
-    expect(offset(KL, box[1]).east).toBeCloseTo(-4, 6)
+  it('turns clockwise with the bearing, rather than mirroring it', () => {
+    // The check that catches a reflection. A mirrored convention gets north
+    // and east right and sends everything between them the wrong way.
+    const { nose } = axes(45)
+    expect(nose.east).toBeCloseTo(Math.SQRT1_2, 9)
+    expect(nose.north).toBeCloseTo(Math.SQRT1_2, 9)
+    const south = axes(225).nose
+    expect(south.east).toBeCloseTo(-Math.SQRT1_2, 9)
+    expect(south.north).toBeCloseTo(-Math.SQRT1_2, 9)
   })
 
-  it('turns with the bearing', () => {
-    const east = footprint([KL.lon, KL.lat], 90, W, W * 5, origin, 0)
-    for (const nose of [east[0], east[1]]) {
-      expect(offset(KL, nose).east).toBeCloseTo(20, 6)
-      expect(Math.abs(offset(KL, nose).north)).toBeCloseTo(4, 6)
+  it("leans the model's left flank the way keepLeft offsets", () => {
+    // The model is built with +Y to the left, so the two must agree or a train
+    // would be drawn facing one way and shifted off the other side.
+    for (let b = 0; b < 360; b += 15) {
+      const { left } = axes(b)
+      const at = keepLeft({ ...KL, bearingDeg: b }, origin, 100)
+      const { east, north } = offset(KL, at)
+      expect(left.east).toBeCloseTo(east / 100, 6)
+      expect(left.north).toBeCloseTo(north / 100, 6)
     }
   })
 })
 
-describe('trainShapes', () => {
+describe('trainInstances', () => {
   const colors = lineColors(rail)
   const line = rail.lines[0]
   const dir = line.directions.find((d) => d.dir === 0)!
-  const train: ActiveTrain = {
-    line,
-    dir,
-    at: line.total / 2,
-    dwelling: false,
-    stop: 1,
-    secs: 30,
-    dep: 0,
-    id: 'test',
+  const W = 4
+
+  /** A train half way along `l`, in `l`'s direction 0. */
+  function halfWayAlong(l: PreparedLine): ActiveTrain {
+    const d = l.directions.find((x) => x.dir === 0)!
+    return { line: l, dir: d, at: l.total / 2, dwelling: false, stop: 1, secs: 30, dep: 0, id: 'x' }
   }
 
   it('carries the colour of its own line', () => {
-    const [shape] = trainShapes([train], 4, colors)
-    expect(shape.color).toEqual(colors.get(line.id))
+    const [it0] = trainInstances([halfWayAlong(line)], W, colors).LRT
+    expect(it0.color).toEqual(colors.get(line.id))
   })
 
-  it('draws the roof on top of the body, narrower and shorter', () => {
-    const W = 4
-    const [shape] = trainShapes([train], W, colors)
-    expect(shape.body[0][2]).toBe(VIADUCT_M)
-    expect(shape.roof[0][2]).toBeCloseTo(VIADUCT_M + W * 1.7, 9)
-    expect(metresApart(shape.roof[0], shape.roof[1])).toBeCloseTo(1.6 * W, 6)
-    expect(metresApart(shape.roof[1], shape.roof[2])).toBeCloseTo(9.4 * W, 6)
-  })
-
-  it('sits to the left of the track, not on it', () => {
-    const W = 4
+  it('sits to the left of the track, not on it, at viaduct height', () => {
+    const train = halfWayAlong(line)
     const centre = pointAt(line, train.at, dir.reversed)
-    const [shape] = trainShapes([train], W, colors)
-    // The body's centre is the mean of its four corners.
-    const mid = [
-      shape.body.reduce((n, c) => n + c[0], 0) / 4,
-      shape.body.reduce((n, c) => n + c[1], 0) / 4,
-    ]
-    expect(metresApart([centre.lon, centre.lat], mid)).toBeCloseTo(W * 1.15, 6)
+    const [it0] = trainInstances([train], W, colors).LRT
+    expect(metresApart([centre.lon, centre.lat], it0.position)).toBeCloseTo(W * 0.8, 6)
+    expect(it0.position[2]).toBe(VIADUCT_M)
+  })
+
+  it('faces along the track', () => {
+    const train = halfWayAlong(line)
+    const centre = pointAt(line, train.at, dir.reversed)
+    const [it0] = trainInstances([train], W, colors).LRT
+    expect(it0.orientation).toEqual([0, yawFor(centre.bearingDeg), 0])
+  })
+
+  it('puts every train under the model its mode is drawn with', () => {
+    // One train per line, so every mode in the feed gets at least one.
+    const byMode = trainInstances(rail.lines.map(halfWayAlong), W, colors)
+    const counted = Object.values(byMode).reduce((n, list) => n + list.length, 0)
+    expect(counted).toBe(rail.lines.length)
+    for (const l of rail.lines) expect(byMode[l.mode].length).toBeGreaterThan(0)
+    // And no mode in the feed is missing a model to be drawn with.
+    for (const mode of Object.keys(byMode)) expect(MODEL_URL[mode as Mode]).toBeTruthy()
+  })
+
+  it('gives the two directions of one track opposite orientations', () => {
+    const back = line.directions.find((d) => d.dir === 1)!
+    const there = trainInstances([halfWayAlong(line)], W, colors).LRT[0]
+    const backAgain = trainInstances(
+      [{ ...halfWayAlong(line), dir: back }],
+      W,
+      colors,
+    ).LRT[0]
+    const turn = Math.abs(there.orientation[1] - backAgain.orientation[1]) % 360
+    expect(Math.min(turn, 360 - turn)).toBeCloseTo(180, 3)
   })
 })
 

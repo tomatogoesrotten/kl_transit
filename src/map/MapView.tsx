@@ -5,7 +5,14 @@ import { activeTrains, klNow, network, prepare, setTimeOfDay } from '../sim'
 import type { DayType } from '../sim'
 import { labelLayerId, lineLayer, stationDots, stationLayer } from './layers'
 import type { StationDot } from './layers'
-import { busyStations, halfWidth, lineColors, stationIndex, trainLayers, trainShapes } from './trains'
+import {
+  busyStations,
+  halfWidth,
+  lineColors,
+  stationIndex,
+  trainInstances,
+  trainLayers,
+} from './trains'
 import { FOOTPRINT_LAYER, layerOps, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
 import { ModeSwitch } from '../ui/ModeSwitch'
@@ -155,7 +162,13 @@ export function MapView() {
               'silently pasting it over the labels.',
           )
         } else {
-          const deck = new MapLibreOverlay({ interleaved: true })
+          // The train models are fetched, so this is the one place a failure
+          // would otherwise be silent: a missing or malformed .gltf would just
+          // mean no trains, which looks exactly like a quiet night.
+          const deck = new MapLibreOverlay({
+            interleaved: true,
+            onError: (e) => console.error('deck.gl error:', e),
+          })
           m.addControl(deck)
           const dots = stationDots(rail)
           statics.current = {
@@ -221,7 +234,7 @@ export function MapView() {
         layers: [
           s.lines,
           s.stations,
-          ...trainLayers(trainShapes(trains, W, COLORS), W, s.beforeId),
+          ...trainLayers(trainInstances(trains, W, COLORS), W, s.beforeId),
         ],
       })
     }

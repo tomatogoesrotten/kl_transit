@@ -1,8 +1,12 @@
-import { SolidPolygonLayer } from '@deck.gl/layers'
+import { ScenegraphLayer } from '@deck.gl/mesh-layers'
 import { pointAt } from '../sim'
-import type { ActiveTrain, LonLat, Origin, Point, PreparedNetwork } from '../sim'
+import type { ActiveTrain, LonLat, Mode, Origin, Point, PreparedNetwork } from '../sim'
 import { hexToRgb } from './layers'
 import type { Interleaved, StationDot } from './layers'
+import brtModel from './models/brt.gltf?url'
+import lrtModel from './models/lrt.gltf?url'
+import mrlModel from './models/mrl.gltf?url'
+import mrtModel from './models/mrt.gltf?url'
 
 type Rgb = [number, number, number]
 
@@ -19,16 +23,43 @@ type Rgb = [number, number, number]
  */
 export const VIADUCT_M = 10
 
-/**
- * The body colour, the same for every train — the roof carries the line.
- *
- * Taste, not contract: a mid slate, dark enough to read against the pale city
- * map and light enough to read against the wireframe's near-black ground.
- */
-const BODY: Rgb = [110, 122, 138]
+/** The colour of a train whose line is somehow not in the colour table. */
+const FALLBACK: Rgb = [110, 122, 138]
 
 /** How far to the left of the centre line a train sits, as a multiple of `W`. */
-const KEEP_LEFT = 1.15
+const KEEP_LEFT = 0.8
+
+/**
+ * The size the models are authored at, in metres — the `W = 4` floor.
+ *
+ * Every model is built at the size a train is drawn when the camera is close,
+ * so the layer's scale is simply `W / 4`. See `scripts/build_train_models.mjs`
+ * for the dimensions themselves and why they are shorter and wider than real
+ * rolling stock.
+ */
+const MODEL_W = 4
+
+/** The four modes the feed uses, and the model each one is drawn with. */
+export const MODEL_URL: Record<Mode, string> = {
+  LRT: lrtModel,
+  MRT: mrtModel,
+  MRL: mrlModel,
+  BRT: brtModel,
+}
+
+const MODES = Object.keys(MODEL_URL) as Mode[]
+
+/**
+ * Modes the feed has and we have no model for, so the warning is said once
+ * rather than sixty times a second.
+ *
+ * A rebuilt feed could introduce a fifth mode; `src/map/trains.test.ts` checks
+ * every mode in the shipped data has a model, so this is the case where the
+ * data moved ahead of the code. Those trains go undrawn, and the console says
+ * so — quietly dropping them is exactly the kind of silence this project has
+ * been bitten by before.
+ */
+const unknownModes = new Set<string>()
 
 /**
  * Half the width of a train, in metres, for the current camera.
@@ -75,37 +106,25 @@ export function keepLeft(point: Point, origin: Origin, metres: number): LonLat {
 }
 
 /**
- * The four ground corners of a box centred on `centre`, pointing along
- * `bearingDeg`, `2 * halfWide` across and `2 * halfLong` from nose to tail,
- * with its base at `z` metres.
+ * deck.gl's yaw, in degrees, for a train on compass bearing `bearingDeg`.
  *
- * The corners run from the nose's right-hand side round to the tail's; the ring
- * is left open and wound either way, because `SolidPolygonLayer` closes it and
- * fixes the winding itself.
+ * `getOrientation` is `[pitch, yaw, roll]`, and yaw is NOT a compass bearing.
+ * Read out of the installed @deck.gl/mesh-layers, `calculateTransformMatrix`
+ * sends the model's +X axis to `(cos yaw, sin yaw, 0)` in a frame where +x is
+ * east and +y is north. So yaw is an ordinary anticlockwise angle measured
+ * from east, and turning a clockwise-from-north bearing into it is a
+ * reflection, not a shift: `90 - B`, not `B - 90`.
+ *
+ * The same matrix sends the model's +Y axis to `(-cos B, +sin B)`, which is
+ * the very vector `keepLeft` offsets along — so a model built with +X forward
+ * and +Y to the left comes out facing and leaning the right way together.
+ *
+ * This is the shape of mistake the prototype already made once: its Three.js
+ * rotation was `180 - B`, a mirror rather than a turn. A wrong sign here looks
+ * fine on straight track and wrong only on curves, so it gets a test.
  */
-export function footprint(
-  centre: LonLat,
-  bearingDeg: number,
-  halfWide: number,
-  halfLong: number,
-  origin: Origin,
-  z: number,
-): [number, number, number][] {
-  const b = (bearingDeg * Math.PI) / 180
-  // Forward is the unit vector at the bearing, in (east, north) components.
-  const fLon = (Math.sin(b) * halfLong) / origin.kx
-  const fLat = (Math.cos(b) * halfLong) / origin.ky
-  // Left is that vector turned a quarter turn anticlockwise — the same normal
-  // the keep-left offset uses, so the box sits square on its own centre.
-  const lLon = (-Math.cos(b) * halfWide) / origin.kx
-  const lLat = (Math.sin(b) * halfWide) / origin.ky
-  const [lon, lat] = centre
-  return [
-    [lon + fLon - lLon, lat + fLat - lLat, z],
-    [lon + fLon + lLon, lat + fLat + lLat, z],
-    [lon - fLon + lLon, lat - fLat + lLat, z],
-    [lon - fLon - lLon, lat - fLat - lLat, z],
-  ]
+export function yawFor(bearingDeg: number): number {
+  return 90 - bearingDeg
 }
 
 /** One line colour per line id, parsed once. `hexToRgb` does a parseInt. */
@@ -113,76 +132,94 @@ export function lineColors(rail: PreparedNetwork): Map<string, Rgb> {
   return new Map(rail.lines.map((line) => [line.id, hexToRgb(line.color)]))
 }
 
-export interface TrainShape {
-  /** The body's footprint: 2W across, 10W long. */
-  body: [number, number, number][]
-  /** The roof's: 1.6W across, 9.4W long, sitting on the body's top. */
-  roof: [number, number, number][]
+/** One train, as the three accessors a `ScenegraphLayer` instance needs. */
+export interface TrainInstance {
+  position: [lon: number, lat: number, z: number]
+  /** deck.gl's [pitch, yaw, roll], in degrees. */
+  orientation: [number, number, number]
   color: Rgb
 }
 
 /**
- * Where every running train's box goes this frame.
+ * Every running train this frame, grouped by the model it is drawn with.
  *
- * At the `W = 4` floor the body is 8 m across, 6.8 m tall and 40 m long, which
- * is a plausible two- or three-car set. The proportions come from the
- * prototype; the numbers are a starting point, not a contract.
+ * Grouped rather than one flat list because a `ScenegraphLayer` draws one
+ * model, so there is a layer per mode and each needs only its own trains.
  */
-export function trainShapes(
+export function trainInstances(
   trains: readonly ActiveTrain[],
   W: number,
   colors: ReadonlyMap<string, Rgb>,
-): TrainShape[] {
-  const shapes: TrainShape[] = []
+): Record<Mode, TrainInstance[]> {
+  const byMode: Record<Mode, TrainInstance[]> = { LRT: [], MRT: [], MRL: [], BRT: [] }
   for (const train of trains) {
     // Once per train: this call gives both the position and the bearing the
-    // keep-left offset and the box orientation are built from.
+    // keep-left offset and the model's orientation are built from.
     const p = pointAt(train.line, train.at, train.dir.reversed)
-    const centre = keepLeft(p, train.line.origin, W * KEEP_LEFT)
-    const roofBase = VIADUCT_M + W * 1.7
-    shapes.push({
-      body: footprint(centre, p.bearingDeg, W, W * 5, train.line.origin, VIADUCT_M),
-      roof: footprint(centre, p.bearingDeg, W * 0.8, W * 4.7, train.line.origin, roofBase),
-      color: colors.get(train.line.id) ?? BODY,
+    const [lon, lat] = keepLeft(p, train.line.origin, W * KEEP_LEFT)
+    const list = byMode[train.line.mode]
+    if (!list) {
+      if (!unknownModes.has(train.line.mode)) {
+        unknownModes.add(train.line.mode)
+        console.warn(
+          `No train model for mode "${train.line.mode}" (${train.line.id}). ` +
+            'Those trains are not being drawn. Add one in scripts/build_train_models.mjs.',
+        )
+      }
+      continue
+    }
+    list.push({
+      position: [lon, lat, VIADUCT_M],
+      orientation: [0, yawFor(p.bearingDeg), 0],
+      color: colors.get(train.line.id) ?? FALLBACK,
     })
   }
-  return shapes
+  return byMode
 }
 
 /**
- * The two layers a train is made of: a neutral body and a line-coloured roof.
+ * One `ScenegraphLayer` per mode: an LRT set, an MRT set, a monorail and a bus.
  *
- * Two `SolidPolygonLayer`s rather than one, because a solid polygon carries one
- * colour, and rather than a mesh, because `@deck.gl/mesh-layers` is not
- * installed. `SolidPolygonLayer` and not `PolygonLayer`: the latter is a
- * composite that also builds a stroke layer nothing here wants.
+ * The per-line colour is `getColor`, which tints the whole model. That works
+ * only because the models shade themselves with a base-colour texture rather
+ * than material colours: deck.gl's flat lighting path multiplies the instance
+ * colour by that texture, and throws a material's own colour away. See the
+ * header of `scripts/build_train_models.mjs`.
+ *
+ * Colour stays data-driven — it comes from `line.color` by way of `colors` — so
+ * a new line in the feed is drawn in its own colour with no new model file. A
+ * new *mode* would need one, and there are four.
+ *
+ * `scenegraph` is a URL, and the same string every frame, so deck.gl's async
+ * prop resolution fetches it once and reuses it (it compares the value against
+ * the last one it saw). While it is still loading the layer's `draw` returns
+ * early, so those frames simply have no trains rather than throwing.
  *
  * Rebuilt every frame on purpose. deck.gl layers are immutable descriptors, not
  * GPU state, so a fresh `data` array regenerates the attributes on its own and
  * needs no `updateTriggers`.
  */
-export function trainLayers(shapes: TrainShape[], W: number, beforeId: string) {
-  return [
-    new SolidPolygonLayer<TrainShape, Interleaved>({
-      id: 'train-bodies',
-      data: shapes,
-      beforeId,
-      extruded: true,
-      // The polygon's own z is the base; `getElevation` is the height above it.
-      getPolygon: (d) => d.body,
-      getElevation: W * 1.7,
-      getFillColor: BODY,
-    }),
-    new SolidPolygonLayer<TrainShape, Interleaved>({
-      id: 'train-roofs',
-      data: shapes,
-      beforeId,
-      extruded: true,
-      getPolygon: (d) => d.roof,
-      getElevation: W * 0.4,
-      getFillColor: (d) => d.color,
-    }),
-  ]
+export function trainLayers(byMode: Record<Mode, TrainInstance[]>, W: number, beforeId: string) {
+  return MODES.map(
+    (mode) =>
+      new ScenegraphLayer<TrainInstance, Interleaved>({
+        id: `trains-${mode}`,
+        data: byMode[mode],
+        beforeId,
+        scenegraph: MODEL_URL[mode],
+        // Flat, and said out loud rather than left to the default: it is the
+        // path on which `getColor` multiplies the model's texture instead of
+        // replacing everything with one colour.
+        _lighting: 'flat',
+        // The models are metres, built at the size a train is when the camera
+        // is close. Below the `W = 4` floor this is 1 and the train is a fixed
+        // real-world object; above it the train holds its size on screen.
+        sizeScale: W / MODEL_W,
+        getPosition: (d) => d.position,
+        getOrientation: (d) => d.orientation,
+        getColor: (d) => d.color,
+      }),
+  )
 }
 
 /**
