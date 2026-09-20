@@ -31,7 +31,7 @@ const shortName = (name: string) => name.replace(/ Line$/, '')
  */
 export function LinesPanel() {
   const hidden = useView((s) => s.hidden)
-  const { toggleLine, select } = useView.getState()
+  const { toggleLine, goToStation } = useView.getState()
   // Read once, at first render, and never in the frame loop.
   const [open, setOpen] = useState(() => window.innerWidth > PHONE)
 
@@ -91,8 +91,11 @@ export function LinesPanel() {
                         // A hidden line has no markers on the map, so selecting
                         // one would describe something invisible.
                         disabled={off}
+                        // Selects it AND sends the map to it. Reaching a
+                        // station from a list and then being left looking at
+                        // the other side of the city is not arriving anywhere.
                         onClick={() =>
-                          select({ kind: 'station', lineId: line.id, stopId: stop.id })
+                          goToStation({ kind: 'station', lineId: line.id, stopId: stop.id })
                         }
                       >
                         {network.stations[stop.id]?.name ?? stop.id}

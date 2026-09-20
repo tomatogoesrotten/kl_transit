@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import { Map, NavigationControl } from 'maplibre-gl'
+import type { PaddingOptions } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
 import { activeTrains, klNow, network, prepare } from '../sim'
 import type { ActiveTrain, KlTime } from '../sim'
+import { arrivalZoom, panelPadding } from './camera'
 import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
@@ -18,7 +21,7 @@ import type { TrainInstance } from './trains'
 import { FOOTPRINT_LAYER, layerOps, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
 import { ModeSwitch } from '../ui/ModeSwitch'
-import { findTrain, trainSelection } from '../ui/inspect'
+import { distinctSelections, findTrain, trainSelection } from '../ui/inspect'
 import { paintCard, paintCounts, paintReadout, panels, showTip } from '../ui/readout'
 import type { Selection } from '../ui/store'
 import { setMs, useClock, useView } from '../ui/store'
@@ -54,6 +57,29 @@ function saveMode(mode: MapMode) {
 
 // Interleaved rendering shares MapLibre's own context, which is WebGL2 only.
 const hasWebGL2 = document.createElement('canvas').getContext('webgl2') !== null
+
+/**
+ * Both read once, at load: each is a question about the device and the person
+ * using it, not about any one event, and matchMedia is not free.
+ *
+ * A fingertip is not a mouse cursor — it covers a good deal more than eight
+ * pixels of track — so a coarse pointer gets a wider hit radius. And an
+ * animated camera flight across the city is exactly the motion that
+ * `prefers-reduced-motion` exists to ask for less of.
+ */
+const COARSE_POINTER = window.matchMedia?.('(pointer: coarse)').matches ?? false
+const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+/** Picking radius in pixels. The default is zero, which is an exact pixel hit. */
+const PICK_RADIUS = COARSE_POINTER ? 18 : 8
+
+/**
+ * How many things one click may offer between.
+ *
+ * Four tracks share the corridor at its busiest, and a train standing at a
+ * platform covers its own station marker, so six is room to spare.
+ */
+const PICK_DEPTH = 6
 
 const rail = prepare(network)
 // Parsed once, not once per train per frame.
@@ -147,7 +173,13 @@ function instanceOf(
   return undefined
 }
 
-export function MapView() {
+/**
+ * @param panels The bottom-left column of panels, so the camera can be told how
+ *   much of the viewport they cover. Passed in rather than found by class name:
+ *   App owns that element, and a `querySelector` here would be a silent
+ *   dependency on its markup.
+ */
+export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement | null> }) {
   const container = useRef<HTMLDivElement>(null)
   // A ref, not state: the animation loop drives this, and a re-render sixty
   // times a second is exactly what we are avoiding.
@@ -169,6 +201,9 @@ export function MapView() {
   // Hover is for pointers that hover. Without this a tap flashes a description
   // before the card opens, because a browser sends a mousemove before a click.
   const coarse = useRef(false)
+  // The last camera padding applied, so a one-shot move to a station is framed
+  // in the same visible box the follow camera centres in.
+  const padding = useRef<PaddingOptions>({ top: 0, right: 0, bottom: 0, left: 0 })
 
   useEffect(() => {
     const m = new Map({
@@ -185,6 +220,54 @@ export function MapView() {
     // A map that fails quietly is how this project shipped three milestones on
     // top of a base map that never drew a single tile. Say something.
     m.on('error', (e) => console.error('maplibre error:', e.error ?? e))
+
+    // The panels along the bottom cover part of the map, so the camera is told
+    // to treat only the rest of the viewport as visible. Without this, centring
+    // a followed train centres it BEHIND the panels on a phone, which is the
+    // one place following matters most.
+    //
+    // Measured rather than assumed, because the height genuinely moves: the
+    // time bar wraps at narrow widths, the no-trains notice adds a whole row,
+    // and at phone width the card joins the same column. A ResizeObserver is
+    // the browser telling us when that happened; nothing here runs per frame.
+    const applyPadding = () => {
+      const height = m.getContainer().clientHeight
+      const top = column.current?.getBoundingClientRect().top ?? height
+      padding.current = {
+        top: 0,
+        right: 0,
+        bottom: panelPadding(height, height - top),
+        left: 0,
+      }
+      m.setPadding(padding.current)
+    }
+    const sizes = new ResizeObserver(applyPadding)
+    if (column.current) sizes.observe(column.current)
+    // The observer only watches the column. Turning the phone changes how much
+    // of the viewport that same column covers, so the map's own resize counts.
+    m.on('resize', applyPadding)
+    applyPadding()
+
+    // The lines panel asking the map to go and look at a station. One
+    // deliberate move, so it is animated — unlike the follow camera, which
+    // jumps every frame precisely because a per-frame animation cancels itself.
+    const offGoTo = useView.subscribe((state, prev) => {
+      if (state.goTo === prev.goTo || !state.goTo) return
+      const s = statics.current
+      const i = s?.index.get(state.goTo.stopId)
+      // No overlay means no station markers to go to either — see hasWebGL2.
+      if (!s || i === undefined) return
+      const dot = s.dots[i]
+      const to = {
+        // The DRAWN position: the feed's own coordinates sit up to 105 m off
+        // the rails, so a station is on the track, not beside it.
+        center: [dot.position[0], dot.position[1]] as [number, number],
+        zoom: arrivalZoom(m.getZoom()),
+        padding: padding.current,
+      }
+      if (REDUCED_MOTION) m.jumpTo(to)
+      else m.easeTo(to)
+    })
 
     // Taking the map back stops the camera following a train. `dragstart` is
     // the signal because MapLibre only fires it for a real interaction and
@@ -263,8 +346,8 @@ export function MapView() {
             getCursor: ({ isHovering }) => (isHovering ? 'pointer' : 'grab'),
             // And the radius defaults to zero, which is an exact pixel hit. A
             // train three kilometres away is a few pixels across; without a
-            // radius it is uncatchable.
-            pickingRadius: 8,
+            // radius it is uncatchable. Wider again for a fingertip.
+            pickingRadius: PICK_RADIUS,
             onHover: (info) => {
               if (coarse.current) return showTip(null, 0, 0)
               showTip(hoverText(info.layer?.id, info.object, latest.current), info.x, info.y)
@@ -272,8 +355,33 @@ export function MapView() {
             onClick: (info) => {
               const now = latest.current
               if (!now) return
-              useView.getState().select(pickToSelection(info.layer?.id, info.object, now))
               showTip(null, 0, 0)
+              // Every candidate under the click, not just the topmost one.
+              //
+              // `pickMultipleObjects` is marked "@deprecated WebGL only. Use
+              // `pickObjectsAsync` instead" in @deck.gl/core — but the overlay
+              // forwards only `pickObject`, `pickMultipleObjects` and
+              // `pickObjects` (see @deck.gl/maplibre's overlay.d.ts), so
+              // `pickObjectsAsync` is not reachable from here. This is the
+              // method that exists. Do not "modernise" it into one that does
+              // not, and check overlay.d.ts before believing otherwise.
+              const found = distinctSelections(
+                deck
+                  .pickMultipleObjects({
+                    x: info.x,
+                    y: info.y,
+                    radius: PICK_RADIUS,
+                    depth: PICK_DEPTH,
+                  })
+                  .map((pick) => pickToSelection(pick.layer?.id, pick.object, now)),
+              )
+              const view = useView.getState()
+              // Two directions run a few pixels apart by design, and four
+              // tracks share the corridor. A wider radius alone would only pick
+              // the topmost more often, so offer the choice instead of
+              // guessing. Nothing under the click still dismisses the card.
+              if (found.length > 1) view.offer(found)
+              else view.select(found[0] ?? null)
             },
           })
           m.addControl(deck)
@@ -315,6 +423,7 @@ export function MapView() {
     // blank while it waits for the next one.
     let lastPanels = 0
     let lastSelection: Selection | null = null
+    let lastCardOpen = false
     const tick = (now: number) => {
       // Re-armed first, so a throw below costs one frame rather than the whole
       // animation.
@@ -362,11 +471,18 @@ export function MapView() {
       // Counts on every line, the network total, and the open card. Four times
       // a second: current enough to read, rare enough not to distract, and
       // never a React render — see `panels` in readout.ts.
-      if (view.selection !== lastSelection || now - lastPanels >= 250) {
+      // The card being re-opened counts as a change too, or pressing Details on
+      // the following strip shows a blank card until the next quarter-second.
+      if (
+        view.selection !== lastSelection ||
+        view.cardOpen !== lastCardOpen ||
+        now - lastPanels >= 250
+      ) {
         lastSelection = view.selection
+        lastCardOpen = view.cardOpen
         lastPanels = now
         paintCounts(trains)
-        if (view.selection) paintCard(rail, view.selection, trains, t, ms)
+        if (view.selection && view.cardOpen) paintCard(rail, view.selection, trains, t, ms)
       }
 
       const deck = overlay.current
@@ -445,8 +561,9 @@ export function MapView() {
           })
         } else {
           // Its trip ended, or its line was hidden. Either way there is nothing
-          // left to keep up with. The card says which, honestly.
-          view.stopFollowing()
+          // left to keep up with, and the card is re-opened to say which —
+          // honestly, and because a shut card says nothing at all.
+          view.followedGone()
         }
       }
 
@@ -462,6 +579,8 @@ export function MapView() {
       // In the same cleanup as the map, or React's development double-mount
       // leaves two loops racing on one overlay.
       cancelAnimationFrame(frame.current)
+      sizes.disconnect()
+      offGoTo()
       m.getContainer().removeEventListener('pointerdown', notePointer)
       overlay.current?.finalize()
       overlay.current = null

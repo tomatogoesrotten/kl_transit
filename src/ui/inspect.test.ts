@@ -4,8 +4,10 @@ import type { ActiveTrain, KlTime } from '../sim'
 import {
   departedMs,
   departuresAt,
+  distinctSelections,
   findTrain,
   runningWaits,
+  selectionLabel,
   stationCard,
   trainCard,
   trainSelection,
@@ -230,5 +232,95 @@ describe('departedMs', () => {
         expect(into, train.id).toBeLessThanOrEqual(train.dir.duration)
       }
     }
+  })
+})
+
+describe('distinctSelections', () => {
+  const train = (dep: number, lineId = 'AG', dir: 0 | 1 = 0): TrainSelection => ({
+    kind: 'train',
+    lineId,
+    dir,
+    dep,
+    departedMs: 0,
+  })
+
+  it('drops the picks that were neither a train nor a station', () => {
+    expect(distinctSelections([null, null])).toEqual([])
+  })
+
+  it('keeps the order the picker reported, topmost first', () => {
+    const picks = [train(100), train(200), train(300)]
+    expect(distinctSelections(picks)).toEqual(picks)
+  })
+
+  it('counts the two directions of one line as two things', () => {
+    // The whole reason this exists: trains keep left, so the two directions run
+    // a few pixels apart and one click covers both.
+    expect(distinctSelections([train(100, 'AG', 0), train(100, 'AG', 1)])).toHaveLength(2)
+  })
+
+  it('counts one train picked twice as one thing', () => {
+    // Not by `ActiveTrain.id`, which midnight and a forced timetable rename.
+    const again: TrainSelection = { ...train(100), departedMs: 999 }
+    expect(distinctSelections([train(100), again])).toEqual([train(100)])
+  })
+
+  it('separates a train from the platform it is standing at', () => {
+    const station = { kind: 'station', lineId: 'AG', stopId: 'AG1' } as const
+    expect(distinctSelections([train(100), station, station])).toEqual([train(100), station])
+  })
+})
+
+describe('selectionLabel', () => {
+  it('names a train by its line and where it is going', () => {
+    const label = selectionLabel(rail, {
+      kind: 'train',
+      lineId: 'AG',
+      dir: 0,
+      dep: 0,
+      departedMs: 0,
+    })
+    expect(label).toBe(`${ag.code} to ${forward.to}`)
+    // And the other direction reads differently, or the chooser would offer two
+    // rows nobody could tell apart.
+    expect(label).not.toBe(
+      selectionLabel(rail, { kind: 'train', lineId: 'AG', dir: 1, dep: 0, departedMs: 0 }),
+    )
+  })
+
+  it('names a station, and says which line it is on', () => {
+    const stopId = forward.stops[0].id
+    expect(selectionLabel(rail, { kind: 'station', lineId: 'AG', stopId })).toBe(
+      `${rail.stations[stopId].name} · ${ag.name}`,
+    )
+  })
+
+  it('says something rather than nothing for a line no longer in the data', () => {
+    expect(selectionLabel(rail, { kind: 'station', lineId: 'GONE', stopId: 'ZZ9' })).toContain('ZZ9')
+  })
+})
+
+// The keyboard route onto the map is the lines panel: a line's row expands to
+// its stations, and each station is a button. It sidesteps pointer precision
+// entirely, so the data behind every one of those buttons has to resolve.
+describe('the lines panel station buttons', () => {
+  it('every one of them names a real station and opens a card that describes it', () => {
+    const { t } = at(PEAK)
+    const trains = running(at(PEAK).ms)
+    let buttons = 0
+    for (const line of rail.lines) {
+      const stops = line.directions.find((d) => d.dir === 0)?.stops ?? []
+      expect(stops.length, line.id).toBeGreaterThan(1)
+      for (const stop of stops) {
+        buttons++
+        // What the button shows.
+        expect(rail.stations[stop.id]?.name, stop.id).toBeTruthy()
+        // And what pressing it opens.
+        const card = stationCard(rail, { kind: 'station', lineId: line.id, stopId: stop.id }, trains, t)
+        expect(card.title, stop.id).toBe(rail.stations[stop.id].name)
+        expect(card.rows.length, stop.id).toBeGreaterThan(0)
+      }
+    }
+    expect(buttons).toBeGreaterThan(180)
   })
 })

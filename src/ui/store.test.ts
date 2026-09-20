@@ -208,3 +208,120 @@ describe('useView', () => {
     expect(view().following).toBe(false)
   })
 })
+
+describe('useView: the card, following, and what one click found', () => {
+  const view = () => useView.getState()
+  const aTrain: Selection = {
+    kind: 'train',
+    lineId: 'AG',
+    dir: 0,
+    dep: 27000,
+    departedMs: SAT_2200,
+  }
+  const otherWay: Selection = { ...aTrain, dir: 1 }
+  const aStation = { kind: 'station', lineId: 'AG', stopId: 'AG1' } as const
+
+  beforeEach(() => {
+    useView.setState({
+      selection: null,
+      cardOpen: false,
+      following: false,
+      choices: [],
+      goTo: null,
+      hidden: new Set(),
+    })
+  })
+
+  it('opens the card on whatever is selected, and shuts it on nothing', () => {
+    view().select(aTrain)
+    expect(view()).toMatchObject({ selection: aTrain, cardOpen: true })
+    view().select(null)
+    expect(view()).toMatchObject({ selection: null, cardOpen: false })
+  })
+
+  it('keeps following when the card is shut, which is the whole point', () => {
+    // On a phone the card covers the bottom of the screen, which is where the
+    // camera had just centred the train. Shutting it used to stop the follow,
+    // so the only way to SEE the train was to stop following it.
+    view().select(aTrain)
+    view().toggleFollow()
+    view().closeCard()
+    expect(view().cardOpen).toBe(false)
+    expect(view().following).toBe(true)
+    expect(view().selection).toEqual(aTrain)
+  })
+
+  it('lets the card be brought back without touching the camera', () => {
+    view().select(aTrain)
+    view().toggleFollow()
+    view().closeCard()
+    view().showCard()
+    expect(view()).toMatchObject({ cardOpen: true, following: true })
+  })
+
+  it('deselects when the card is shut and nothing is being followed', () => {
+    view().select(aTrain)
+    view().closeCard()
+    expect(view()).toMatchObject({ selection: null, cardOpen: false })
+  })
+
+  it('stops following when the viewer takes the map back, and leaves the card alone', () => {
+    view().select(aTrain)
+    view().toggleFollow()
+    view().closeCard()
+    view().stopFollowing()
+    expect(view()).toMatchObject({ following: false, cardOpen: false })
+  })
+
+  it('brings the card back when the followed train stops being drawn', () => {
+    // The display has to say the train is no longer running, and a shut card
+    // says nothing at all.
+    view().select(aTrain)
+    view().toggleFollow()
+    view().closeCard()
+    view().followedGone()
+    expect(view()).toMatchObject({ following: false, cardOpen: true, selection: aTrain })
+  })
+
+  it('offers a choice, and choosing one selects it and clears the rest', () => {
+    view().offer([aTrain, otherWay])
+    expect(view().choices).toHaveLength(2)
+    view().select(otherWay)
+    expect(view().selection).toEqual(otherWay)
+    expect(view().choices).toHaveLength(0)
+  })
+
+  it('drops the choices without deselecting, for Escape', () => {
+    view().select(aTrain)
+    view().offer([aTrain, otherWay])
+    view().clearChoices()
+    expect(view().choices).toHaveLength(0)
+    expect(view().selection).toEqual(aTrain)
+  })
+
+  it('asks the map to go to a station, once per press', () => {
+    view().goToStation(aStation)
+    expect(view()).toMatchObject({ selection: aStation, cardOpen: true })
+    const first = view().goTo!
+    expect(first.stopId).toBe('AG1')
+    // Pressing the same station again is a second move, not a no-op: the map
+    // watches this field for a change.
+    view().goToStation(aStation)
+    expect(view().goTo).not.toBe(first)
+    expect(view().goTo!.n).toBe(first.n + 1)
+  })
+
+  it('stops following when the viewer asks to go and look somewhere else', () => {
+    view().select(aTrain)
+    view().toggleFollow()
+    view().goToStation(aStation)
+    expect(view().following).toBe(false)
+  })
+
+  it('shuts the card when the selected thing is hidden with its line', () => {
+    view().select(aTrain)
+    view().toggleFollow()
+    view().toggleLine('AG')
+    expect(view()).toMatchObject({ selection: null, cardOpen: false, following: false })
+  })
+})

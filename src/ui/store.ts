@@ -124,16 +124,54 @@ export type Selection = TrainSelection | StationSelection
 
 export interface ViewStore {
   selection: Selection | null
+  /**
+   * Whether the card describing the selection is on screen.
+   *
+   * Separate from `selection` because following used to end the moment the card
+   * was closed - and on a phone the card covers the very train the camera is
+   * chasing, so the only way to SEE it was to stop following it. Closing the
+   * card now puts the card away and leaves the selection, and the camera, alone.
+   */
+  cardOpen: boolean
   /** Whether the camera is keeping up with the selected train. */
   following: boolean
+  /**
+   * The things one click found, when it found more than one and the viewer has
+   * not said which they meant. Empty the rest of the time.
+   *
+   * Trains keep left, so both directions of a line run a few pixels apart by
+   * design; on the shared corridor there are four tracks of them. A wider hit
+   * radius alone would only pick the topmost more often, which is not a choice.
+   */
+  choices: readonly Selection[]
+  /**
+   * A station the lines panel asked the map to go and look at.
+   *
+   * `n` counts the asks, so that choosing the same station twice is two moves
+   * rather than one - the map listens for this field CHANGING.
+   */
+  goTo: { stopId: string; n: number } | null
   /** Line ids the viewer has switched off. Replaced, never mutated - see `toggleLine`. */
   hidden: ReadonlySet<string>
 
   select: (selection: Selection | null) => void
+  closeCard: () => void
+  showCard: () => void
+  offer: (choices: readonly Selection[]) => void
+  clearChoices: () => void
+  goToStation: (selection: StationSelection) => void
   toggleFollow: () => void
   stopFollowing: () => void
+  followedGone: () => void
   toggleLine: (lineId: string) => void
 }
+
+/**
+ * Nothing to choose between. One shared instance, so "are there choices" stays
+ * an identity test and a component subscribed to it is not re-rendered by every
+ * ordinary click handing it a fresh empty array.
+ */
+const NO_CHOICES: readonly Selection[] = []
 
 /**
  * The things a person changes about what they are looking at.
@@ -144,19 +182,57 @@ export interface ViewStore {
  */
 export const useView = create<ViewStore>()((set, get) => ({
   selection: null,
+  cardOpen: false,
   following: false,
+  choices: NO_CHOICES,
+  goTo: null,
   hidden: new Set<string>(),
 
   // Selecting something new never inherits the last thing's follow. Following a
-  // train you are no longer looking at is a camera that has run away.
-  select: (selection) => set({ selection, following: false }),
+  // train while reading about a different one is a camera that has run away.
+  // Selecting always opens the card: choosing a thing is asking about it.
+  select: (selection) =>
+    set({ selection, cardOpen: selection !== null, following: false, choices: NO_CHOICES }),
+
+  // Putting the card away, which is NOT the same as deselecting. While the
+  // camera is following, the selection is the train it is following and the
+  // indicator says so; otherwise nothing refers to it any more, so it goes.
+  closeCard: () =>
+    set(get().following ? { cardOpen: false } : { cardOpen: false, selection: null }),
+
+  showCard: () => set({ cardOpen: true }),
+
+  offer: (choices) => set({ choices }),
+
+  clearChoices: () => set({ choices: NO_CHOICES }),
+
+  // The lines panel's station button. It selects the station AND asks the map
+  // to go there, and it stops following: asking to look somewhere else is
+  // taking the map back, the same as dragging it.
+  goToStation: (selection) =>
+    set({
+      selection,
+      cardOpen: true,
+      following: false,
+      choices: NO_CHOICES,
+      goTo: { stopId: selection.stopId, n: (get().goTo?.n ?? 0) + 1 },
+    }),
 
   toggleFollow: () => set({ following: !get().following }),
 
-  // Called from the frame loop when the followed train stops being drawn, so it
-  // must not write when there is nothing to write - see `setTrainsRunning`.
+  // The viewer taking the map back, by dragging it or by pressing Stop. The
+  // card is left exactly as they had it. It must not write when there is
+  // nothing to write - see `setTrainsRunning`.
   stopFollowing: () => {
     if (get().following) set({ following: false })
+  },
+
+  // Called from the frame loop when the followed train stops being drawn: its
+  // trip ended, or its line was hidden. The card comes back, because the spec
+  // says the display must say the train is no longer running, and a card that
+  // is shut says nothing at all.
+  followedGone: () => {
+    if (get().following) set({ following: false, cardOpen: true })
   },
 
   // A new Set every time, so `cameraLayers` can tell it changed by identity
@@ -167,7 +243,11 @@ export const useView = create<ViewStore>()((set, get) => ({
     if (!hidden.delete(lineId)) hidden.add(lineId)
     const selection = get().selection
     const gone = selection !== null && hidden.has(selection.lineId)
-    set(gone ? { hidden, selection: null, following: false } : { hidden })
+    set(
+      gone
+        ? { hidden, selection: null, cardOpen: false, following: false, choices: NO_CHOICES }
+        : { hidden, choices: NO_CHOICES },
+    )
   },
 }))
 

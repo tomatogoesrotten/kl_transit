@@ -1,5 +1,5 @@
 import { DAY, hhmm, nextDepartures } from '../sim'
-import type { ActiveTrain, KlTime, PreparedDirection, PreparedNetwork } from '../sim'
+import type { ActiveTrain, KlTime, Network, PreparedDirection, PreparedNetwork } from '../sim'
 import { dur } from './format'
 import type { Selection, StationSelection, TrainSelection } from './store'
 
@@ -290,6 +290,58 @@ export function cardContent(
   return sel.kind === 'train'
     ? trainCard(rail, sel, trains, ms)
     : stationCard(rail, sel, trains, t)
+}
+
+/**
+ * A selection as one string, so that two picks of the same thing can be told
+ * from two different things.
+ *
+ * The same fields `TrainSelection` is identified by, for the same reason: the
+ * renderer's `ActiveTrain.id` is renamed by midnight and by a forced timetable.
+ */
+export function selectionKey(sel: Selection): string {
+  return sel.kind === 'train'
+    ? `train:${sel.lineId}:${sel.dir}:${sel.dep}`
+    : `station:${sel.lineId}:${sel.stopId}`
+}
+
+/**
+ * The distinct things one click found, in the order the renderer reported them.
+ *
+ * A pick with a radius answers with every candidate under it. Trains keep left,
+ * so the two directions of a line run a few pixels apart on purpose, and on the
+ * shared corridor there are four tracks' worth of them; a train standing at a
+ * platform also sits on top of its own station marker. Entries the picker
+ * returned that are neither a train nor a station come in as null and are
+ * dropped here.
+ */
+export function distinctSelections(picked: readonly (Selection | null)[]): Selection[] {
+  const seen = new Set<string>()
+  const out: Selection[] = []
+  for (const sel of picked) {
+    if (!sel) continue
+    const key = selectionKey(sel)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(sel)
+  }
+  return out
+}
+
+/**
+ * What to call a selection in a list: enough to tell it from the one beside it.
+ *
+ * Takes the raw `Network` rather than a prepared one so the React components
+ * can call it with the data they already import. A `PreparedNetwork` satisfies
+ * it too.
+ */
+export function selectionLabel(net: Network, sel: Selection): string {
+  const line = net.lines.find((l) => l.id === sel.lineId)
+  if (sel.kind === 'station') {
+    return `${net.stations[sel.stopId]?.name ?? sel.stopId} · ${line?.name ?? sel.lineId}`
+  }
+  const dir = line?.directions.find((d) => d.dir === sel.dir)
+  return dir ? `${line!.code} to ${dir.to}` : `${line?.code ?? sel.lineId} train`
 }
 
 /** "7 trains running", and the per-line tallies behind it. Hidden lines still count. */

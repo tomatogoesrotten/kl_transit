@@ -1,14 +1,35 @@
 html, body, #root { height: 100%; margin: 0; }
 body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
 
+/* What this is and what it is honestly claiming. A native <details>, so it
+   collapses to the information mark alone when it is in the way.
+
+   `pointer-events: none` on the panel and `auto` on the summary: the map has to
+   stay draggable through the three lines of text, and giving the whole panel
+   its events back would put a dead zone over the middle of the city. */
 .caption {
   position: absolute; left: 10px; top: 10px; z-index: 1;
+  max-width: min(34ch, calc(100vw - 20px));
   padding: 8px 12px; border-radius: 8px;
   background: rgba(17, 17, 17, 0.8); backdrop-filter: blur(4px);
   pointer-events: none;
 }
-.caption strong { display: block; font-size: 15px; }
-.caption span { display: block; color: #aaa; font-size: 12px; max-width: 34ch; }
+.caption > summary {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; cursor: pointer; list-style: none; user-select: none;
+  pointer-events: auto;
+}
+.caption > summary::-webkit-details-marker { display: none; }
+.caption > summary:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.caption .i {
+  display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 20px; height: 20px; border: 1px solid #999; border-radius: 50%;
+  color: #ddd; font: italic 700 12px/1 Georgia, serif;
+}
+/* Collapsed: the mark, and nothing else. */
+.caption:not([open]) { padding: 6px; }
+.caption:not([open]) strong { display: none; }
+.caption span { display: block; margin-top: 4px; color: #aaa; font-size: 12px; }
 
 /* Below MapLibre's navigation control (three 29px buttons, 10px in from the top
    right), so the two never overlap — nor the caption, which is top left. */
@@ -43,12 +64,26 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
    prototype did — is replaced here by nothing at all. */
 .bottom-left {
   position: absolute; left: 10px; right: 10px; bottom: 34px; z-index: 1;
+  /* Never taller than the viewport it sits in. With a cap the panels below can
+     shrink and scroll inside themselves; without one the column simply runs off
+     the top of a short screen. */
+  max-height: calc(100% - 44px);
   display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
   /* The column spans the width but only its children should catch the pointer;
      the gaps between them are map. */
   pointer-events: none;
 }
-.bottom-left > * { pointer-events: auto; }
+.bottom-left > * {
+  pointer-events: auto;
+  /* A flex child will not shrink below its own content unless it is told it
+     may. Without these three a wide card or a long station name pushes the
+     column past the edge of the screen, which is what it used to do. */
+  min-width: 0; min-height: 0; max-width: 100%;
+}
+/* The time bar is the one thing that must stay whole: it holds the clock and
+   every control. Everything above it gives way and scrolls inside itself. */
+.timebar { flex: 0 0 auto; }
+.card, .lines, .chooser { flex: 0 1 auto; }
 
 /* The time bar: the clock, and every control that changes which moment is shown. */
 .timebar {
@@ -120,7 +155,9 @@ select.btn { padding: 7px 8px; }
 .line-list input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
 /* A hidden line stays readable, just plainly off. */
 .line-list input:not(:checked) ~ * { opacity: 0.45; }
-.line-name { font-size: 13px; }
+/* `1fr` is still `min-width: auto` inside a grid, so the name column will not
+   shrink below the longest line name without this. */
+.line-name { min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
 .n { font-size: 12px; color: #aaa; font-variant-numeric: tabular-nums; }
 .pill {
   display: inline-block; min-width: 46px; padding: 3px 5px; border-radius: 4px;
@@ -135,6 +172,10 @@ select.btn { padding: 7px 8px; }
   display: block; width: 100%; padding: 4px 6px; text-align: left;
   border: 0; border-radius: 4px; background: transparent; color: #eee;
   font: inherit; font-size: 13px; cursor: pointer;
+  /* "Bandar Tun Hussein Onn" in a 300 px column, and a button will not wrap by
+     itself. `anywhere` rather than `break-word` because only `anywhere` lets
+     the panel measure itself narrower than its longest word. */
+  overflow-wrap: anywhere;
 }
 .stop:hover { background: #2b2b2b; }
 .stop:disabled { color: #777; cursor: default; }
@@ -151,6 +192,8 @@ select.btn { padding: 7px 8px; }
 }
 .card h2 { margin: 6px 0 0; font-size: 18px; line-height: 1.15; }
 .card .sub { margin: 2px 0 0; color: #aaa; font-size: 12px; }
+/* Station names are long and the card is narrow on a phone. See `.stop`. */
+.card h2, .card .sub, .card td { overflow-wrap: anywhere; }
 .card .status { margin: 9px 0 0; font-weight: 600; }
 .card table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 13px; }
 .card th { padding: 9px 0 3px; text-align: left; color: #aaa; font-size: 12px; font-weight: 600; }
@@ -168,6 +211,33 @@ select.btn { padding: 7px 8px; }
 }
 .x:hover { background: #2b2b2b; color: #eee; }
 .x:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+
+/* The camera is still following a train, and its card is shut. Deliberately one
+   short row: the point of shutting the card was to see the train. */
+.following {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 10px; border-radius: 8px;
+  background: rgba(17, 17, 17, 0.85); backdrop-filter: blur(4px);
+  font-size: 13px;
+}
+.following .eye {
+  flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #8ab4ff;
+}
+/* The name gives way before the buttons do: losing the end of a line name is a
+   great deal better than losing the way to stop. */
+.following .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.following .btn { flex: 0 0 auto; padding: 5px 9px; }
+
+/* One click found more than one thing. Trains keep left, so both directions run
+   a few pixels apart by design, and four tracks share the corridor; a wider hit
+   radius on its own would only pick the topmost more often. */
+.chooser {
+  width: min(300px, 100%); max-height: 40vh; overflow: auto;
+  padding: 8px; border-radius: 8px;
+  background: rgba(17, 17, 17, 0.88); backdrop-filter: blur(4px);
+}
+.chooser p { margin: 0 0 4px; padding: 0 6px; color: #aaa; font-size: 12px; }
+.chooser ul { list-style: none; margin: 0; padding: 0; }
 
 /* The hover description. It follows the pointer, so it is written straight to
    the DOM — never through React state. */
@@ -200,4 +270,14 @@ select.btn { padding: 7px 8px; }
   .timebar .ticks { display: none; }
   .lines { width: 100%; max-height: 30vh; }
   .card { max-height: 34vh; }
+  .chooser { max-height: 30vh; }
+  .caption { max-width: calc(100vw - 20px); }
+}
+
+/* A small phone held upright. The clock keeps its own line rather than
+   squeezing the slider into nothing beside it. */
+@media (max-width: 380px) {
+  .timebar time { font-size: 17px; }
+  .timebar .clock { flex: 1 1 100%; }
+  .timebar .scrub { flex: 1 1 100%; }
 }
