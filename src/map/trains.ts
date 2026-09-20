@@ -45,7 +45,7 @@ const KEEP_LEFT = 0.8
  * for the dimensions themselves and why they are shorter and wider than real
  * rolling stock.
  */
-const MODEL_W = 4
+export const MODEL_W = 4
 
 /** The four modes the feed uses, and the model each one is drawn with. */
 export const MODEL_URL: Record<Mode, string> = {

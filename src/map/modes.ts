@@ -25,7 +25,7 @@ export const WIREFRAME = {
   footprintWidth: 0.8,
 } as const
 
-/** The id of the one layer this app adds to the base map. See `MapView`. */
+/** The id of the wireframe footprint layer this app adds to the base map. See `MapView`. */
 export const FOOTPRINT_LAYER = 'wireframe-building-footprints'
 
 /**
@@ -35,7 +35,9 @@ export const FOOTPRINT_LAYER = 'wireframe-building-footprints'
 export interface StyleLayer {
   id: string
   type: string
+  source?: string
   'source-layer'?: string
+  minzoom?: number
   // `unknown`, not `'visible' | 'none'`: MapLibre lets visibility be an
   // expression too, and we only ever ask whether it is the literal 'none'.
   layout?: { visibility?: unknown }
@@ -111,6 +113,12 @@ function wireframeRule(layer: StyleLayer): Record<string, unknown> | 'hide' | nu
  *
  * City mode resets only the properties the wireframe would have set, so a
  * round trip is a true round trip and nothing is hardcoded.
+ *
+ * The layers this app adds itself are not in that snapshot, so nothing here
+ * ever touches them, and each one is decided on where it is added in `MapView`:
+ * the wireframe footprints are switched on and off by hand, and the tinted
+ * station buildings are left lit in both modes on purpose — see
+ * our own added layers, which are not in the snapshot.
  */
 export function layerOps(layers: readonly StyleLayer[], mode: MapMode): LayerOp[] {
   return layers.map((layer) => {

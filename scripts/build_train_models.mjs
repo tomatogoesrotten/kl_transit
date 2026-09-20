@@ -1,4 +1,4 @@
-// Builds one glTF 2.0 model per transit mode into src/map/models/.
+// Builds one glTF 2.0 vehicle model per transit mode into src/map/models/.
 //
 //     npm run models
 //
@@ -57,6 +57,7 @@ const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'map', 'm
 // --------------------------------------------------------------------------
 
 const PALETTE = [
+  // Vehicles.
   [255, 255, 255], // 0 ROOF  - the line colour at full strength
   [223, 226, 231], // 1 BODY  - the sides, a shade off it
   [ 62,  70,  84], // 2 GLASS - the window band, dark and cool
@@ -64,7 +65,6 @@ const PALETTE = [
   [ 46,  48,  52], // 4 UNDER - underframe, and the monorail's beam
   [ 98, 106, 120], // 5 CAB   - the ends, where the windscreen is
   [ 34,  34,  38], // 6 GAP   - the faces either side of a coupling
-  [255, 255, 255], // 7 spare
 ]
 
 const ROOF = 0
@@ -117,14 +117,19 @@ function quad(m, a, b, c, d, shade) {
   m.idx.push(i, i + 1, i + 2, i, i + 2, i + 3)
 }
 
-/** A plain rectangular box, used for the monorail's beam and the bus's joint. */
+/** An axis-aligned box, all six faces in one palette shade. */
+function cuboid(m, xa, xb, y0, y1, z0, z1, shade) {
+  quad(m, [xa, y1, z0], [xb, y1, z0], [xb, y1, z1], [xa, y1, z1], shade)
+  quad(m, [xa, y0, z1], [xb, y0, z1], [xb, y0, z0], [xa, y0, z0], shade)
+  quad(m, [xa, y1, z1], [xb, y1, z1], [xb, y0, z1], [xa, y0, z1], shade)
+  quad(m, [xa, y0, z0], [xb, y0, z0], [xb, y1, z0], [xa, y1, z0], shade)
+  quad(m, [xa, y1, z0], [xa, y0, z0], [xa, y0, z1], [xa, y1, z1], shade)
+  quad(m, [xb, y0, z0], [xb, y1, z0], [xb, y1, z1], [xb, y0, z1], shade)
+}
+
+/** A box centred on the centre line, used for the monorail's beam and the bus's joint. */
 function box(m, xa, xb, hw, z0, z1, shade) {
-  quad(m, [xa, hw, z0], [xb, hw, z0], [xb, hw, z1], [xa, hw, z1], shade)
-  quad(m, [xa, -hw, z1], [xb, -hw, z1], [xb, -hw, z0], [xa, -hw, z0], shade)
-  quad(m, [xa, hw, z1], [xb, hw, z1], [xb, -hw, z1], [xa, -hw, z1], shade)
-  quad(m, [xa, -hw, z0], [xb, -hw, z0], [xb, hw, z0], [xa, hw, z0], shade)
-  quad(m, [xa, hw, z0], [xa, -hw, z0], [xa, -hw, z1], [xa, hw, z1], shade)
-  quad(m, [xb, -hw, z0], [xb, hw, z0], [xb, hw, z1], [xb, -hw, z1], shade)
+  cuboid(m, xa, xb, -hw, hw, z0, z1, shade)
 }
 
 /**

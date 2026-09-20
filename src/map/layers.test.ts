@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { network, pointAt, prepare } from '../sim'
 import type { PreparedLine } from '../sim'
 import {
+  stationRadius,
   cameraLayers,
   hexToRgb,
   labelLayerId,
   lineLayer,
   networkLayers,
   stationDots,
+  stationLayer,
 } from './layers'
 import { gapMetres, offsetAt, offsetPoint, sharedCorridors } from './offset'
 
@@ -15,7 +17,7 @@ const rail = prepare(network)
 const corridors = sharedCorridors(rail)
 /** A separation in metres, for the tests that need one. The app's comes from the zoom. */
 const GAP = 40
-const layers = networkLayers(rail, corridors, GAP, 'test-label-layer')
+const layers = networkLayers(rail, corridors, GAP, 'test-label-layer', 14)
 
 /** Metres apart, using the network's own flat projection of the Klang Valley. */
 function metresApart(a: { lon: number; lat: number }, b: { lon: number; lat: number }) {
@@ -96,6 +98,24 @@ describe('the station layer', () => {
     )
     expect(stations.props.data).toHaveLength(total)
     expect(total).toBe(stationDots(rail, corridors, GAP).length)
+  })
+
+  it('fills a marker while a train stands at it, and leaves the rest clear', () => {
+    // Milestone 4's one visible signal, and the station models added around it
+    // must not take it away. `filled` is a layer-level
+    // property, so the fill is always drawn and made transparent when idle —
+    // an opaque idle fill would punch a hole in the city underneath.
+    const dots = stationDots(rail, corridors, GAP)
+    dots[0].busy = true
+    const getFillColor = accessor<(typeof dots)[number], number[]>(
+      stationLayer(dots, 'test-label-layer', 1, 14).props.getFillColor,
+    )
+    expect(getFillColor(dots[0])).toEqual(dots[0].color)
+    expect(getFillColor(dots[1])).toEqual([0, 0, 0, 0])
+    // And the layer is told the set changed, or deck.gl keeps the colours it
+    // already uploaded: `dots` is one array mutated in place.
+    expect(stationLayer(dots, 'test-label-layer', 2, 14).props.updateTriggers.getFillColor).toBe(2)
+    dots[0].busy = false
   })
 
   it('puts a station on the track, not at its published coordinate', () => {
@@ -289,5 +309,27 @@ describe('hiding a line', () => {
     const b = build(14, 3.146, hidden)
     expect(b).toBe(a)
     expect(build(14, 3.146, new Set(['AG']))).not.toBe(a)
+  })
+})
+
+describe('station markers grow as the camera pulls back', () => {
+  it('is bigger zoomed out than zoomed in', () => {
+    expect(stationRadius(10)).toBeGreaterThan(stationRadius(15))
+  })
+
+  it('never jumps: flat outside the band, monotonic inside it', () => {
+    expect(stationRadius(6)).toBe(stationRadius(10))
+    expect(stationRadius(18)).toBe(stationRadius(15))
+    for (let z = 9; z < 16; z += 0.25) {
+      expect(stationRadius(z + 0.25), `at zoom ${z}`).toBeLessThanOrEqual(stationRadius(z))
+    }
+  })
+
+  it('stays a ring rather than becoming a disc', () => {
+    // The stroke grows with the radius, so a big marker still reads as a ring
+    // with a hole in it - and the hole is what the busy fill shows through.
+    for (const z of [8, 10, 12.5, 15, 17]) {
+      expect(stationRadius(z), `at zoom ${z}`).toBeGreaterThan(stationRadius(z) / 2.5)
+    }
   })
 })

@@ -108,7 +108,13 @@ export function stationDots(
       const p = pointAt(line, stop.at, false)
       const slot = offsetAt(corridors, line.id, stop.at)
       const [lon, lat] = slot === 0 ? [p.lon, p.lat] : keepLeft(p, line.origin, slot * gap)
-      dots.push({ id: stop.id, line: line.id, position: [lon, lat, z], color, busy: false })
+      dots.push({
+        id: stop.id,
+        line: line.id,
+        position: [lon, lat, z],
+        color,
+        busy: false,
+      })
     }
   }
   return dots
@@ -195,7 +201,34 @@ export function sharedLineLayer(
  * markers at a fraction of a metre — the elevation is load-bearing, not
  * decorative. See the note on `VIADUCT_M` in trains.ts.
  */
-export function stationLayer(dots: StationDot[], beforeId: string, busyVersion: number) {
+/**
+ * How big a station marker is drawn, in pixels, at a given zoom.
+ *
+ * Bigger when zoomed out, which is the opposite of how it reads: zoomed out
+ * there is less room, but a station also has to stand out from a line that has
+ * shrunk to nothing, and there is no building to mark it — the style carries no
+ * buildings at all below zoom 13. Zoomed in the line is wide, the city is
+ * detailed, and a big ring is just a blot over the platform it is marking.
+ *
+ * Linear between the two ends and flat outside them, so there is no zoom at
+ * which the markers jump.
+ */
+export function stationRadius(zoom: number): number {
+  const t = Math.min(1, Math.max(0, (zoom - FAR_ZOOM) / (NEAR_ZOOM - FAR_ZOOM)))
+  return FAR_RADIUS_PX + (NEAR_RADIUS_PX - FAR_RADIUS_PX) * t
+}
+
+const FAR_ZOOM = 10
+const NEAR_ZOOM = 15
+const FAR_RADIUS_PX = 9
+const NEAR_RADIUS_PX = 4
+
+export function stationLayer(
+  dots: StationDot[],
+  beforeId: string,
+  busyVersion: number,
+  zoom: number,
+) {
   return new ScatterplotLayer<StationDot, Interleaved>({
     id: 'stations',
     data: dots,
@@ -207,9 +240,11 @@ export function stationLayer(dots: StationDot[], beforeId: string, busyVersion: 
     getFillColor: (d) => (d.busy ? d.color : IDLE),
     stroked: true,
     radiusUnits: 'pixels',
-    getRadius: 4,
+    getRadius: stationRadius(zoom),
     lineWidthUnits: 'pixels',
-    getLineWidth: 2,
+    // The ring keeps its proportions rather than a fixed hairline, or a big
+    // marker reads as a bubble instead of a station.
+    getLineWidth: Math.max(2, stationRadius(zoom) / 2.5),
     updateTriggers: { getFillColor: busyVersion },
   })
 }
@@ -274,10 +309,11 @@ export function networkLayers(
   corridors: Corridors,
   gap: number,
   beforeId: string,
+  zoom: number,
 ) {
   return [
     lineLayer(rail, corridors, beforeId),
     sharedLineLayer(rail, corridors, gap, beforeId),
-    stationLayer(stationDots(rail, corridors, gap), beforeId, 0),
+    stationLayer(stationDots(rail, corridors, gap), beforeId, 0, zoom),
   ] as const
 }

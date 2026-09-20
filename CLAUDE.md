@@ -249,5 +249,23 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   ~135 km/h. It is measured against the timetable instead. Headroom today is 30.1 km/h.
 - Every feed check is proven to fail: `check:feed` breaks the data six ways on every run and asserts
   each specific check fires. The daily log carries that evidence.
-- Next: deploy to Cloudflare Pages, then issues #23 to #26 (merge interchanges, station models,
-  labels and filtering, the journey planner).
+- Deployed as a Cloudflare Worker serving static assets. Two fixes keep the map drawing at all, one
+  per build — see the MapLibre worker note in the stack section. `ls dist/assets | grep worker` must
+  list a chunk of roughly half a megabyte.
+- Stations are per-line RINGS and nothing else. They carry which line a platform belongs to and
+  whether a train is standing at it (Milestone 4), and they are the pick target. They GROW as the
+  camera pulls back — 4 px zoomed in, 9 px zoomed out — because zoomed out the line has shrunk to
+  nothing and there is nothing else marking a station, while zoomed in a big ring is a blot over the
+  platform it marks.
+- WE DRAW NO STATION GEOMETRY, AND WE DO NOT TINT THE CITY'S BUILDINGS. Four attempts were made and
+  rejected: 3D models (three rounds of shape, size and colour), beacons above the roofline, and
+  colouring the real OSM buildings near each station. The last is worth knowing about, because the
+  idea is a good one and the data defeats it: the `building` layer has minzoom 13 so nothing shows
+  when zoomed out, and its only fields are `colour`, `hide_3d`, `render_height` and
+  `render_min_height` — NOTHING says which building is a station. Proximity lit up whole
+  neighbourhoods.
+- Clickability is NOT the marker's size. The pick radius is 12 px for fine pointers and 18 for
+  coarse. Growing a marker to make it easier to hit was tried and rejected — the visible marker and
+  the hit target are different things.
+- Next: issues #23, #25 and #26 (merge interchanges, labels and filtering, the journey planner), and
+   #35, where rotating while following still does not work on touch.

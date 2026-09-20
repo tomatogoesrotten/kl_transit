@@ -16,7 +16,13 @@ import mrt from './models/mrt.gltf?raw'
  * silhouette in the line colour. See scripts/build_train_models.mjs.
  */
 
-/** The size each model is authored at, in metres: length, width, height. */
+/**
+ * The size each model is authored at, in metres: length, width, height.
+ *
+ * Every one is shorter and wider than the real thing, because a real four-car
+ * set is 25 times longer than it is wide and at map scale that is under a pixel
+ * across. Chosen by eye. See scripts/build_train_models.mjs.
+ */
 const EXPECTED: Record<string, [number, number, number]> = {
   lrt: [20.0, 4.4, 3.8],
   mrt: [22.4, 5.2, 4.0],
@@ -78,7 +84,7 @@ describe.each(Object.entries(FILES))('%s.gltf', (name, text) => {
     expect(size[2]).toBeCloseTo(EXPECTED[name][2], 3)
   })
 
-  it('points its nose along +X and sits on z = 0', () => {
+  it('lies along +X and sits on z = 0', () => {
     // The convention `yawFor` and the viaduct height both assume: travel along
     // +X, left along +Y, up from zero. A Blender export with "+Y Up" left on
     // would fail this, and would otherwise just lie on its side in the city.

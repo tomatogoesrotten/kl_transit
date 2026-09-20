@@ -87,16 +87,26 @@ const hasWebGL2 = document.createElement('canvas').getContext('webgl2') !== null
 const COARSE_POINTER = window.matchMedia?.('(pointer: coarse)').matches ?? false
 const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
-/** Picking radius in pixels. The default is zero, which is an exact pixel hit. */
-const PICK_RADIUS = COARSE_POINTER ? 18 : 8
+/**
+ * Picking radius in pixels. The default is zero, which is an exact pixel hit.
+ *
+ * This, and not the size of the station models, is what makes a station easy to
+ * click. The two were briefly the same lever and it was the wrong one: growing
+ * the models until they were comfortable to hit made the city centre a pile of
+ * furniture. A tolerance costs nothing on screen.
+ */
+const PICK_RADIUS = COARSE_POINTER ? 18 : 12
 
 /**
  * How many things one click may offer between.
  *
  * Four tracks share the corridor at its busiest, and a train standing at a
- * platform covers its own station marker, so six is room to spare.
+ * platform covers its own station marker and the station model around it.
+ * Titiwangsa alone is four rings plus one model, so this has to leave room for
+ * a train behind them — the depth is what stops the trains being cut off the
+ * end of a crowded pick.
  */
-const PICK_DEPTH = 6
+const PICK_DEPTH = 8
 
 const rail = prepare(network)
 // Parsed once, not once per train per frame.
@@ -162,20 +172,23 @@ function hoverText(layerId: string | undefined, object: unknown, now: Frame | nu
   return train ? `${train.line.code} to ${train.dir.to}` : null
 }
 
-/** A pick turned into a selection. Null for empty map, which dismisses the card. */
-function pickToSelection(
-  layerId: string | undefined,
-  object: unknown,
-  now: Frame,
-): Selection | null {
-  if (!object || !layerId) return null
+/**
+ * What one pick means, as selections. Empty for anything that is not a train
+ * or a station, and an empty click dismisses the card.
+ *
+ * A list rather than one selection, because one click can land on several
+ * things: two directions run a few pixels apart, four tracks share the busiest
+ * corridor, and a train standing at a platform covers its own ring.
+ */
+function pickToSelection(layerId: string | undefined, object: unknown, now: Frame): Selection[] {
+  if (!object || !layerId) return []
   if (layerId === 'stations') {
     const dot = object as StationDot
-    return { kind: 'station', lineId: dot.line, stopId: dot.id }
+    return [{ kind: 'station', lineId: dot.line, stopId: dot.id }]
   }
-  if (!layerId.startsWith('trains-')) return null
+  if (!layerId.startsWith('trains-')) return []
   const train = now.trains.find((tr) => tr.id === (object as TrainInstance).id)
-  return train ? trainSelection(train, now.t, now.ms) : null
+  return train ? [trainSelection(train, now.t, now.ms)] : []
 }
 
 /** The drawn instance for a train id, or undefined. Not the simulated position — see below. */
@@ -432,7 +445,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
                     radius: PICK_RADIUS,
                     depth: PICK_DEPTH,
                   })
-                  .map((pick) => pickToSelection(pick.layer?.id, pick.object, now)),
+                  // `flatMap`, because one pick on an interchange's model is
+                  // one selection per line calling there.
+                  .flatMap((pick) => pickToSelection(pick.layer?.id, pick.object, now)),
               )
               const view = useView.getState()
               // Two directions run a few pixels apart by design, and four
@@ -456,7 +471,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             camera,
             dots,
             index: stationIndex(dots),
-            stations: stationLayer(dots, beforeId, 0),
+            stations: stationLayer(dots, beforeId, 0, m.getZoom()),
             busyVersion: 0,
             hidden,
           }
@@ -592,7 +607,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       }
       if (changed) {
         s.busyVersion += 1
-        s.stations = stationLayer(s.dots, s.beforeId, s.busyVersion)
+        s.stations = stationLayer(s.dots, s.beforeId, s.busyVersion, m.getZoom())
       }
 
       // `cam.gap` rather than the gap for this frame's camera, so a train is
@@ -628,6 +643,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
 
       // Straight to deck.gl, never through React state. The two static layers go
       // back as the same instances; only the trains are new.
+      //
+      // Order is draw order: the trains go last, so a train standing at a
+      // platform is drawn over its own station marker rather than under it.
       deck.setProps({
         layers: [s.lines, cam.shared, s.stations, ...trainLayers(byMode, W, s.beforeId)],
       })
