@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { Map, NavigationControl } from 'maplibre-gl'
+import { AttributionControl, Map, NavigationControl } from 'maplibre-gl'
 import type { PaddingOptions } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
 import { activeTrains, klNow, network, prepare } from '../sim'
@@ -213,8 +213,14 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       zoom: 12.5,
       pitch: 55,
       bearing: -18,
+      // MapLibre's default attribution renders in full, wraps to two lines and
+      // grows taller than the gap the time bar leaves it, so it sits on top of
+      // the controls. Compact is the same credit behind an information mark —
+      // the licence requires attribution, not that it never collapse.
+      attributionControl: false,
     })
     map.current = m
+    m.addControl(new AttributionControl({ compact: true }), 'bottom-right')
     m.addControl(new NavigationControl({ visualizePitch: true }), 'top-right')
 
     // A map that fails quietly is how this project shipped three milestones on

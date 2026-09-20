@@ -1,4 +1,12 @@
-html, body, #root { height: 100%; margin: 0; }
+/* Padding must not add to width. Without this, `.card { width: 100%; padding:
+   12px 14px }` is 28px wider than the column it sits in and pushes the page off
+   the screen, and a 46px pill in a 46px grid track is really 56px and lands on
+   top of the line name. Both of those shipped. */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* The map fills the window; nothing here is a document to scroll. A page that
+   can scroll hides a layout fault instead of showing it. */
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
 
 /* What this is and what it is honestly claiming. A native <details>, so it
@@ -147,7 +155,10 @@ select.btn { padding: 7px 8px; }
 .lines .dim { color: #aaa; font-size: 12px; font-weight: 400; }
 .line-list { list-style: none; margin: 0; padding: 0 8px 8px; }
 .line-list label {
-  display: grid; grid-template-columns: 16px 46px 1fr auto;
+  /* `auto` for the pill, not a fixed width: the track then sizes to the widest
+     pill across every row, so they still line up and one can never overlap the
+     name. A fixed track is what put `AGL` on top of `LRT Ampang`. */
+  display: grid; grid-template-columns: 16px auto 1fr auto;
   align-items: center; gap: 8px;
   padding: 4px 6px; border-radius: 6px; cursor: pointer;
 }
