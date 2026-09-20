@@ -54,7 +54,7 @@
 - [x] 5.2 Record in `CLAUDE.md` that offsetting interlined lines is a drawing convention and not a
       claim that they run on separate rails, and that the separation is in pixels because a ground
       distance cannot be legible at both ends of the zoom range.
-- [ ] 5.3 **Look at it in a browser** — the shared stretch at street zoom and at city zoom, station
+- [x] 5.3 **Look at it in a browser** — the shared stretch at street zoom and at city zoom, station
       markers on it, and trains on it. Not done until a human has seen it.
 - [x] 5.4 Update `CLAUDE.md`'s Status, and open a pull request referencing issue #18 with
       `Closes #18`.
