@@ -1,6 +1,8 @@
 import { PathLayer, ScatterplotLayer } from '@deck.gl/layers'
 import { pointAt } from '../sim'
-import type { PreparedNetwork } from '../sim'
+import type { PreparedLine, PreparedNetwork } from '../sim'
+import { gapMetres, keepLeft, offsetAt, offsetPath } from './offset'
+import type { Corridors } from './offset'
 
 // deck.gl accepts a `beforeId` naming the MapLibre layer to draw beneath, but
 // @deck.gl/maplibre does not add it to the public layer prop types, so we say so.
@@ -24,9 +26,29 @@ export function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
 
+/**
+ * Metres of height between one line and the next.
+ *
+ * Two pieces of geometry at the same height contend for the depth buffer and
+ * flicker, or tear into stripes, wherever they touch. Half a metre is enough to
+ * settle which is in front and small enough to be invisible: at the map's 55
+ * degrees of pitch the whole eight-line stack leans sideways by about five
+ * metres, well under a pixel except when the camera is right down in a street.
+ *
+ * It is a backstop, not the fix: lines sharing an alignment are separated
+ * sideways by `offset.ts`. This is what a shared stretch nobody anticipated
+ * degrades to — one line in front of the other, rather than barber's pole.
+ */
+const LINE_Z_STEP = 0.5
+
+/** How high `line` is drawn, in metres. By its position in the feed, so every line differs. */
+function elevationOf(rail: PreparedNetwork, line: PreparedLine): number {
+  return rail.lines.indexOf(line) * LINE_Z_STEP
+}
+
 export interface StationDot {
   id: string
-  position: [lon: number, lat: number]
+  position: [lon: number, lat: number, z: number]
   color: [number, number, number]
   /**
    * True while a train is standing at this platform. Mutated in place by the
@@ -51,30 +73,51 @@ const IDLE: [number, number, number, number] = [0, 0, 0, 0]
  * the stored path, and the path is stored in direction 0's sense, so direction 0
  * reads it unreversed. Direction 1 unreversed would mirror every station.
  *
+ * `gap` is the separation between lines sharing an alignment, in metres for the
+ * camera in hand. It is passed in rather than read here for the same reason the
+ * path takes it: a marker has to move with its own line or it floats beside a
+ * track nobody drew.
+ *
  * Stations shared by two lines appear once per line. That is the feed being
  * honest about per-line stop ids; merging them is later work.
  */
-export function stationDots(rail: PreparedNetwork): StationDot[] {
+export function stationDots(rail: PreparedNetwork, corridors: Corridors, gap: number): StationDot[] {
   const dots: StationDot[] = []
   for (const line of rail.lines) {
     const color = hexToRgb(line.color)
+    const z = elevationOf(rail, line)
     const forward = line.directions.find((d) => d.dir === 0)
     if (!forward) continue
     for (const stop of forward.stops) {
       const p = pointAt(line, stop.at, false)
-      dots.push({ id: stop.id, position: [p.lon, p.lat], color, busy: false })
+      const slot = offsetAt(corridors, line.id, stop.at)
+      const [lon, lat] = slot === 0 ? [p.lon, p.lat] : keepLeft(p, line.origin, slot * gap)
+      dots.push({ id: stop.id, position: [lon, lat, z], color, busy: false })
     }
   }
   return dots
 }
 
-/** One path over every line. Built once: it re-tessellates when its data changes. */
-export function lineLayer(rail: PreparedNetwork, beforeId: string) {
-  return new PathLayer<PreparedNetwork['lines'][number], Interleaved>({
-    id: 'lines',
-    data: rail.lines,
+/**
+ * One path per line, for some subset of the lines.
+ *
+ * `updateTriggers` on `getPath` because the accessor closes over `gap`, which
+ * changes with the zoom: without it deck.gl would see the same `data` array and
+ * keep the geometry it already tessellated.
+ */
+function trackLayer(
+  id: string,
+  lines: PreparedLine[],
+  rail: PreparedNetwork,
+  corridors: Corridors,
+  gap: number,
+  beforeId: string,
+) {
+  return new PathLayer<PreparedLine, Interleaved>({
+    id,
+    data: lines,
     beforeId,
-    getPath: (line) => line.path,
+    getPath: (line) => offsetPath(line, corridors, gap, elevationOf(rail, line)),
     getColor: (line) => hexToRgb(line.color),
     // Pixels, not metres: a real track is about three metres wide, which at
     // city-wide zoom is less than one pixel and vanishes. A constant pixel
@@ -83,7 +126,31 @@ export function lineLayer(rail: PreparedNetwork, beforeId: string) {
     getWidth: 4,
     capRounded: true,
     jointRounded: true,
+    updateTriggers: { getPath: gap },
   })
+}
+
+/**
+ * The lines that share track with nobody: drawn on their own geometry.
+ *
+ * Built once and handed back unchanged forever. They are in a layer of their
+ * own so that moving the offset lines — which happens on every zoom change —
+ * does not re-tessellate thousands of vertices that did not move.
+ */
+export function lineLayer(rail: PreparedNetwork, corridors: Corridors, beforeId: string) {
+  const plain = rail.lines.filter((line) => !corridors.has(line.id))
+  return trackLayer('lines', plain, rail, corridors, 0, beforeId)
+}
+
+/** The lines that share track, drawn beside it. Rebuilt when the zoom changes. */
+export function sharedLineLayer(
+  rail: PreparedNetwork,
+  corridors: Corridors,
+  gap: number,
+  beforeId: string,
+) {
+  const shared = rail.lines.filter((line) => corridors.has(line.id))
+  return trackLayer('shared-lines', shared, rail, corridors, gap, beforeId)
 }
 
 /**
@@ -114,7 +181,63 @@ export function stationLayer(dots: StationDot[], beforeId: string, busyVersion: 
   })
 }
 
-/** The whole network: one path layer over every line, one dot layer over every stop. */
-export function networkLayers(rail: PreparedNetwork, beforeId: string) {
-  return [lineLayer(rail, beforeId), stationLayer(stationDots(rail), beforeId, 0)]
+/** What has to be rebuilt when the camera zooms, and the gap it was built with. */
+export interface CameraLayers {
+  shared: ReturnType<typeof sharedLineLayer>
+  dots: StationDot[]
+  gap: number
+}
+
+/**
+ * The geometry that depends on the camera, rebuilt only when the zoom changes.
+ *
+ * The separation between two lines on one alignment is a constant number of
+ * pixels, so the metres it means change every time the camera zooms — and the
+ * drawn path, the station markers on it and the trains running on it all have
+ * to move together or they come apart.
+ *
+ * Not every frame: a `PathLayer` re-tessellates its whole `data` and
+ * `stationDots` walks 187 stops, neither of which belongs in a loop that runs
+ * sixty times a second. The returned function hands back the very same objects
+ * until the zoom actually changes, which is also how deck.gl is told that
+ * nothing about that layer has changed.
+ *
+ * The latitude is read at rebuild time rather than triggering one. It enters
+ * through `cos(lat)`, and the Klang Valley spans 0.3 degrees at latitude 3, so
+ * panning across the whole city moves the gap by less than a fiftieth of a
+ * percent.
+ */
+export function cameraLayers(
+  rail: PreparedNetwork,
+  corridors: Corridors,
+  beforeId: string,
+): (zoom: number, lat: number) => CameraLayers {
+  let lastZoom = NaN
+  let built: CameraLayers | null = null
+  return (zoom, lat) => {
+    if (!built || zoom !== lastZoom) {
+      lastZoom = zoom
+      const gap = gapMetres(zoom, lat)
+      built = {
+        shared: sharedLineLayer(rail, corridors, gap, beforeId),
+        dots: stationDots(rail, corridors, gap),
+        gap,
+      }
+    }
+    return built
+  }
+}
+
+/** The whole network, for one camera: the plain lines, the shared ones, and every stop. */
+export function networkLayers(
+  rail: PreparedNetwork,
+  corridors: Corridors,
+  gap: number,
+  beforeId: string,
+) {
+  return [
+    lineLayer(rail, corridors, beforeId),
+    sharedLineLayer(rail, corridors, gap, beforeId),
+    stationLayer(stationDots(rail, corridors, gap), beforeId, 0),
+  ] as const
 }

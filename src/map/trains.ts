@@ -1,8 +1,10 @@
 import { ScenegraphLayer } from '@deck.gl/mesh-layers'
 import { pointAt } from '../sim'
-import type { ActiveTrain, LonLat, Mode, Origin, Point, PreparedNetwork } from '../sim'
+import type { ActiveTrain, Mode, PreparedNetwork } from '../sim'
 import { hexToRgb } from './layers'
 import type { Interleaved, StationDot } from './layers'
+import { keepLeft, metresPerPixel, offsetAt } from './offset'
+import type { Corridors } from './offset'
 import brtModel from './models/brt.gltf?url'
 import lrtModel from './models/lrt.gltf?url'
 import mrlModel from './models/mrl.gltf?url'
@@ -72,37 +74,13 @@ const unknownModes = new Set<string>()
  * building. The upper bound keeps it from swallowing the state when the camera
  * is out in space.
  *
- * `mpp` is the Mercator ground resolution and ignores the map's pitch, where
- * the prototype used the true eye-to-target distance. Close enough for sizing
- * something; do not reuse it for anything that has to be exact.
+ * `metresPerPixel` is the Mercator ground resolution and ignores the map's
+ * pitch, where the prototype used the true eye-to-target distance. It is the
+ * same relation the line separation in `offset.ts` is measured with, which is
+ * why it lives there and not here.
  */
 export function halfWidth(zoom: number, lat: number): number {
-  const mpp = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom
-  return Math.max(4, Math.min(420, 3.05 * mpp))
-}
-
-/**
- * The point `metres` to the LEFT of the direction of travel at `point`.
- *
- * Trains keep left in Malaysia. At compass bearing B the left-hand direction is
- * `(-cos B, +sin B)` in (east, north) components — the unit vector at B - 90.
- * Those metres become degrees through the network's own flat projection, never
- * haversine or turf: every distance in this app was built against that
- * projection, and mixing in a geodesic one would move them all.
- *
- * The latitude sign is `+`. `pointAt` writes `lat - z / ky` because its `z`
- * runs south; this offset is already a northward component, so it adds.
- *
- * Nothing but a test can catch this being backwards. Getting it wrong moves
- * both directions symmetrically, so the picture still looks perfectly
- * reasonable — it is just a picture of a country that drives on the right.
- */
-export function keepLeft(point: Point, origin: Origin, metres: number): LonLat {
-  const b = (point.bearingDeg * Math.PI) / 180
-  return [
-    point.lon + (-Math.cos(b) * metres) / origin.kx,
-    point.lat + (Math.sin(b) * metres) / origin.ky,
-  ]
+  return Math.max(4, Math.min(420, 3.05 * metresPerPixel(zoom, lat)))
 }
 
 /**
@@ -145,18 +123,36 @@ export interface TrainInstance {
  *
  * Grouped rather than one flat list because a `ScenegraphLayer` draws one
  * model, so there is a layer per mode and each needs only its own trains.
+ *
+ * A train on a stretch its line shares with another carries two perpendicular
+ * offsets: keeping left of its own direction, and its line's side of the shared
+ * alignment. They are shifts in the same frame, so they add.
+ *
+ * The sign is the part to get right. The drawn path is offset to the left of
+ * the STORED direction, while `keepLeft` works from the train's own bearing —
+ * and a train running the line backwards is facing the other way, so its left
+ * is the path's right. Hence the flip on `reversed`. Without it a returning
+ * train runs on the other line's track.
+ *
+ * `train.at` needs the same care: a direction-1 train measures its distance
+ * from its own terminal, so it has to be turned round before it can be looked
+ * up against a corridor, which is recorded along the stored path.
  */
 export function trainInstances(
   trains: readonly ActiveTrain[],
   W: number,
   colors: ReadonlyMap<string, Rgb>,
+  corridors: Corridors,
+  gap: number,
 ): Record<Mode, TrainInstance[]> {
   const byMode: Record<Mode, TrainInstance[]> = { LRT: [], MRT: [], MRL: [], BRT: [] }
   for (const train of trains) {
     // Once per train: this call gives both the position and the bearing the
     // keep-left offset and the model's orientation are built from.
     const p = pointAt(train.line, train.at, train.dir.reversed)
-    const [lon, lat] = keepLeft(p, train.line.origin, W * KEEP_LEFT)
+    const along = train.dir.reversed ? train.line.total - train.at : train.at
+    const slot = offsetAt(corridors, train.line.id, along) * (train.dir.reversed ? -1 : 1)
+    const [lon, lat] = keepLeft(p, train.line.origin, W * KEEP_LEFT + slot * gap)
     const list = byMode[train.line.mode]
     if (!list) {
       if (!unknownModes.has(train.line.mode)) {

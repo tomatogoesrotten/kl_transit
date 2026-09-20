@@ -180,5 +180,21 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   thrown away and every train would be one flat colour.
 - Yaw for a compass bearing is `90 - bearingDeg`. Like the prototype's `180 - B`, it is a mirror and
   not a turn, so a wrong sign looks right on straight track and wrong only on curves.
+- Shared track (issue #18): where two lines run the same alignment, each is drawn beside it rather
+  than on it. Corridors are FOUND IN THE DATA by exact vertex equality, never hardcoded. The
+  separation is in PIXELS, not metres — a ground distance cannot be legible at both ends of the zoom
+  range, so the offset geometry is rebuilt on zoom change (not per frame), and the two shared lines
+  live in their own layer so the other six never re-tessellate.
+- Offsetting interlined lines is a DRAWING CONVENTION. Ampang and Sri Petaling run on the same
+  physical rails; drawing them apart is what every transit map does, and is not a claim that they
+  have separate track.
+- A corridor's shared vertices are NOT contiguous — Ampang shares 89 of 99 positions, with unshared
+  gaps up to 371 m where one line carries curve detail the other lacks. A corridor therefore runs
+  from the first to the last vertex shared with the same partner set; an unshared vertex in between
+  does not end it. Splitting on gaps would snap the line back to centre ten times along the stretch.
+- `Progress.at` for a reversed direction counts from THAT direction's terminal, so it must be turned
+  round (`line.total - at`) before being looked up against a corridor, which is recorded along the
+  stored path. This is separate from, and in addition to, the `reversed` flag `pointAt` already
+  takes.
 - Next: Milestone 5 in GUIDE.md (the clock and time controls). The clock record the loop already
   uses is what those controls will drive.

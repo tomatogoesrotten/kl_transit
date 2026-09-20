@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { network, pointAt, prepare } from '../sim'
 import type { ActiveTrain, Mode, PreparedDirection, PreparedLine } from '../sim'
 import { stationDots } from './layers'
+import { keepLeft, offsetAt, offsetPoint, sharedCorridors } from './offset'
 import {
   busyStations,
   halfWidth,
-  keepLeft,
   lineColors,
   MODEL_URL,
   stationIndex,
@@ -15,6 +15,7 @@ import {
 } from './trains'
 
 const rail = prepare(network)
+const corridors = sharedCorridors(rail)
 const { origin } = rail
 const KL = { lon: 101.699, lat: 3.146 }
 
@@ -165,14 +166,14 @@ describe('trainInstances', () => {
   }
 
   it('carries the colour of its own line', () => {
-    const [it0] = trainInstances([halfWayAlong(line)], W, colors).LRT
+    const [it0] = trainInstances([halfWayAlong(line)], W, colors, corridors, 0).LRT
     expect(it0.color).toEqual(colors.get(line.id))
   })
 
   it('sits to the left of the track, not on it, at viaduct height', () => {
     const train = halfWayAlong(line)
     const centre = pointAt(line, train.at, dir.reversed)
-    const [it0] = trainInstances([train], W, colors).LRT
+    const [it0] = trainInstances([train], W, colors, corridors, 0).LRT
     expect(metresApart([centre.lon, centre.lat], it0.position)).toBeCloseTo(W * 0.8, 6)
     expect(it0.position[2]).toBe(VIADUCT_M)
   })
@@ -180,13 +181,13 @@ describe('trainInstances', () => {
   it('faces along the track', () => {
     const train = halfWayAlong(line)
     const centre = pointAt(line, train.at, dir.reversed)
-    const [it0] = trainInstances([train], W, colors).LRT
+    const [it0] = trainInstances([train], W, colors, corridors, 0).LRT
     expect(it0.orientation).toEqual([0, yawFor(centre.bearingDeg), 0])
   })
 
   it('puts every train under the model its mode is drawn with', () => {
     // One train per line, so every mode in the feed gets at least one.
-    const byMode = trainInstances(rail.lines.map(halfWayAlong), W, colors)
+    const byMode = trainInstances(rail.lines.map(halfWayAlong), W, colors, corridors, 0)
     const counted = Object.values(byMode).reduce((n, list) => n + list.length, 0)
     expect(counted).toBe(rail.lines.length)
     for (const l of rail.lines) expect(byMode[l.mode].length).toBeGreaterThan(0)
@@ -196,19 +197,93 @@ describe('trainInstances', () => {
 
   it('gives the two directions of one track opposite orientations', () => {
     const back = line.directions.find((d) => d.dir === 1)!
-    const there = trainInstances([halfWayAlong(line)], W, colors).LRT[0]
+    const there = trainInstances([halfWayAlong(line)], W, colors, corridors, 0).LRT[0]
     const backAgain = trainInstances(
       [{ ...halfWayAlong(line), dir: back }],
       W,
       colors,
+      corridors,
+      0,
     ).LRT[0]
     const turn = Math.abs(there.orientation[1] - backAgain.orientation[1]) % 360
     expect(Math.min(turn, 360 - turn)).toBeCloseTo(180, 3)
   })
 })
 
+describe('a train on a shared stretch', () => {
+  const colors = lineColors(rail)
+  const ag = rail.lines.find((l) => l.id === 'AG')!
+  /** Well inside Ampang's 6,405 m - 14,893 m corridor and clear of the taper. */
+  const ALONG = 10000
+  const GAP = 40
+  const W = 4
+
+  /** Ampang at `ALONG` metres along its stored path, running one way or the other. */
+  function trainAt(reversed: boolean): ActiveTrain {
+    const dir = ag.directions.find((d) => d.reversed === reversed)!
+    // A direction-1 train counts from its own terminal, so its `at` is the
+    // stored distance turned round. Getting this wrong offsets the return
+    // journey by whatever the corridor says about the wrong end of the line.
+    return {
+      line: ag,
+      dir,
+      at: reversed ? ag.total - ALONG : ALONG,
+      dwelling: false,
+      stop: 1,
+      secs: 30,
+      dep: 0,
+      id: 'x',
+    }
+  }
+
+  function drawnAt(): readonly number[] {
+    return offsetPoint(ag, corridors, GAP, ALONG)
+  }
+
+  it('is drawn beside its own line’s track, not beside the shared alignment', () => {
+    const centre = pointAt(ag, ALONG, false)
+    const drawn = drawnAt()
+    // The track itself has moved half a gap off the alignment...
+    expect(metresApart([centre.lon, centre.lat], drawn)).toBeCloseTo(GAP / 2, 6)
+
+    // ...and the train sits its keep-left distance from THAT, both ways round.
+    for (const reversed of [false, true]) {
+      const [t] = trainInstances([trainAt(reversed)], W, colors, corridors, GAP).LRT
+      expect(metresApart(drawn, t.position), String(reversed)).toBeCloseTo(W * 0.8, 6)
+    }
+  })
+
+  it('still keeps left of its own direction of travel', () => {
+    const drawn = drawnAt()
+    for (const reversed of [false, true]) {
+      const p = pointAt(ag, reversed ? ag.total - ALONG : ALONG, reversed)
+      const [t] = trainInstances([trainAt(reversed)], W, colors, corridors, GAP).LRT
+      // Where keepLeft would put it if the drawn track were the centre line.
+      const expected = keepLeft({ ...p, lon: drawn[0], lat: drawn[1] }, origin, W * 0.8)
+      expect(metresApart(expected, t.position), String(reversed)).toBeCloseTo(0, 6)
+    }
+  })
+
+  it('sends the two directions to opposite sides of the drawn track', () => {
+    // The check that catches the sign on `reversed`. Drop it and both
+    // directions pile onto one side — or, worse, onto the other line.
+    const there = trainInstances([trainAt(false)], W, colors, corridors, GAP).LRT[0]
+    const back = trainInstances([trainAt(true)], W, colors, corridors, GAP).LRT[0]
+    expect(metresApart(there.position, back.position)).toBeCloseTo(2 * W * 0.8, 6)
+  })
+
+  it('leaves a train off the shared stretch exactly where it was', () => {
+    const before = ag.directions[0].stops[0].at
+    expect(offsetAt(corridors, 'AG', before)).toBe(0)
+    const train = { ...trainAt(false), at: before }
+    const withGap = trainInstances([train], W, colors, corridors, GAP).LRT[0]
+    const without = trainInstances([train], W, colors, corridors, 0).LRT[0]
+    expect(metresApart(withGap.position, without.position)).toBeCloseTo(0, 9)
+  })
+})
+
 describe('busyStations', () => {
-  const dots = stationDots(rail)
+  const dots = stationDots(rail, corridors, 0)
   const index = stationIndex(dots)
   const line = rail.lines[0]
   const forward = line.directions.find((d) => d.dir === 0)!
