@@ -3,8 +3,9 @@ import { Map, NavigationControl } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
 import { activeTrains, klNow, network, prepare, setTimeOfDay } from '../sim'
 import type { DayType } from '../sim'
-import { labelLayerId, lineLayer, stationDots, stationLayer } from './layers'
+import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
 import type { StationDot } from './layers'
+import { sharedCorridors } from './offset'
 import {
   busyStations,
   halfWidth,
@@ -52,6 +53,9 @@ const hasWebGL2 = document.createElement('canvas').getContext('webgl2') !== null
 const rail = prepare(network)
 // Parsed once, not once per train per frame.
 const COLORS = lineColors(rail)
+// Ampang and Sri Petaling share their last 8.5 km, so they cannot both be drawn
+// on it. Found in the data rather than listed here: see `sharedCorridors`.
+const CORRIDORS = sharedCorridors(rail)
 
 /**
  * TEMPORARY, and only so this milestone can be looked at: `?t=08:30` starts the
@@ -76,10 +80,16 @@ const FORCED_START = (() => {
  * its data changes — neither belongs in a loop that runs sixty times a second.
  * Handing deck.gl the *same* layer instance again is how it is told nothing
  * about that layer has changed.
+ *
+ * `camera` is the exception, and the reason it is a function: the lines that
+ * share an alignment are separated by a fixed number of PIXELS, so their
+ * geometry and the markers on it have to be rebuilt when the zoom changes. It
+ * returns the same objects until that happens.
  */
 interface Statics {
   beforeId: string
   lines: ReturnType<typeof lineLayer>
+  camera: ReturnType<typeof cameraLayers>
   dots: StationDot[]
   // `ReturnType`, not `Map<string, number>`: MapLibre's `Map` is imported above
   // and shadows the built-in one for the whole module.
@@ -170,10 +180,12 @@ export function MapView() {
             onError: (e) => console.error('deck.gl error:', e),
           })
           m.addControl(deck)
-          const dots = stationDots(rail)
+          const camera = cameraLayers(rail, CORRIDORS, beforeId)
+          const { dots } = camera(m.getZoom(), m.getCenter().lat)
           statics.current = {
             beforeId,
-            lines: lineLayer(rail, beforeId),
+            lines: lineLayer(rail, CORRIDORS, beforeId),
+            camera,
             dots,
             index: stationIndex(dots),
             stations: stationLayer(dots, beforeId, 0),
@@ -209,13 +221,26 @@ export function MapView() {
       const t = klNow(clock.current.ms, clock.current.override)
       const trains = activeTrains(rail, t.sec, t.today, t.yesterday)
       // A train's size follows the camera, so both are read fresh each frame.
-      const W = halfWidth(m.getZoom(), m.getCenter().lat)
+      const zoom = m.getZoom()
+      const lat = m.getCenter().lat
+      const W = halfWidth(zoom, lat)
+
+      // Rebuilt inside only when the zoom changed; the same objects otherwise.
+      const cam = s.camera(zoom, lat)
+
+      let changed = false
+      if (cam.dots !== s.dots) {
+        // Fresh markers, moved for the new zoom, and with `busy` back to false
+        // on all of them — so the loop below has to write it again.
+        s.dots = cam.dots
+        s.index = stationIndex(cam.dots)
+        changed = true
+      }
 
       // Stations fill while a train stands at them. `dots` is one array mutated
       // in place, so the layer is rebuilt with a new trigger only when the set
       // actually changed — most frames it has not.
       const busy = busyStations(trains, s.index)
-      let changed = false
       for (let i = 0; i < s.dots.length; i++) {
         const on = busy.has(i)
         if (s.dots[i].busy !== on) {
@@ -233,8 +258,11 @@ export function MapView() {
       deck.setProps({
         layers: [
           s.lines,
+          cam.shared,
           s.stations,
-          ...trainLayers(trainInstances(trains, W, COLORS), W, s.beforeId),
+          // `cam.gap` rather than the gap for this frame's camera, so a train
+          // is offset by exactly what its own drawn track was offset by.
+          ...trainLayers(trainInstances(trains, W, COLORS, CORRIDORS, cam.gap), W, s.beforeId),
         ],
       })
     }
