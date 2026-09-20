@@ -1,0 +1,6 @@
+# Cloudflare Pages reads the output directory from here rather than from the
+# dashboard, so the deploy is defined in the repository and survives the account
+# it was first set up in. The build command stays `npm run build`; the Node
+# version is pinned in .node-version.
+name = "kl-rail"
+pages_build_output_dir = "dist"

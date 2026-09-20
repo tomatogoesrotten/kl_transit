@@ -69,6 +69,8 @@ Conventions:
 - `npm test`  Vitest
 - `npm run build`  type-check (`tsc --noEmit`) then production build into `dist/`
 - `python scripts/build_network_json.py data/gtfs data/network.json`  rebuild the data file from the raw feed
+- `npm run check:feed`  check a rebuilt `network.json` against rules any valid feed must satisfy,
+  and prove each check can fail. NOT the same job as `npm test`: see below.
 
 ## Architecture
 
@@ -223,5 +225,20 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 - Per-line visibility filters the layers' data and the frame's trains. It must NEVER recompute the
   shared-track corridors from the visible subset — that would snap 8.5 km of line sideways for a
   checkbox.
-- Next: Milestone 7 in GUIDE.md (ship it, and keep the data fresh) — issue #27. Note #7 blocks its
-  refresh check, and the golden tests must be separated from the checks that job runs.
+- Milestone 7 built: a daily GitHub Actions refresh, the deploy config, the README and the app's
+  "about this data". Issue #27, and #7 fixed with it.
+- THERE ARE TWO KINDS OF CHECK AND THEY MUST NOT BE CONFUSED. `npm test` describes THIS SNAPSHOT —
+  six files assert values measured from it (corridor ranges, a station's 105 m offset, Ampang's
+  14,892.7 m, 196 trains at the peak) and that is what makes them mean anything. `npm run check:feed`
+  describes ANY VALID FEED and names no measured value. The refresh runs the second, never the first:
+  running the first would fail on every legitimate timetable change, and the response would be to
+  loosen the assertions until they asserted nothing. When a refresh moves the pinned numbers, a
+  person updates them in a pull request, having looked.
+- A check that rejects valid data is worse than no check, because it gets switched off. `GUIDE.md`'s
+  "no train faster than 120 km/h" measured against the DRAWN position does exactly that: smoothstep
+  peaks at 1.5x the average, so the fastest legitimate segment (89.9 km/h, PH SP24->SP25) renders as
+  ~135 km/h. It is measured against the timetable instead. Headroom today is 30.1 km/h.
+- Every feed check is proven to fail: `check:feed` breaks the data six ways on every run and asserts
+  each specific check fires. The daily log carries that evidence.
+- Next: deploy to Cloudflare Pages, then issues #23 to #26 (merge interchanges, station models,
+  labels and filtering, the journey planner).
