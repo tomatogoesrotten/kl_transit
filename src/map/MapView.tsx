@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { AttributionControl, Map, NavigationControl } from 'maplibre-gl'
+import { AttributionControl, Map, NavigationControl, setWorkerUrl } from 'maplibre-gl'
+// MapLibre picks its worker file by name at runtime - it chooses between the
+// production and development builds - so the name never appears as something a
+// bundler can follow, and Vite emits nothing. The browser then asks for
+// /assets/maplibre-gl-worker.mjs, which is not there, and the request hangs.
+//
+// MapLibre parses every vector tile in that worker, so without it the map paints
+// the style's background colour and stops. It looks exactly like a broken map,
+// with no error anywhere: the style, the sprite and the tile index all load
+// fine. This is the same failure the dev server had, arriving by another route -
+// `optimizeDeps.exclude` fixed it there by keeping MapLibre where its worker
+// sits, which is why the production build was the first place it showed.
+//
+// `?worker&url` makes Vite bundle the worker properly (it imports from a shared
+// chunk, so copying the file alone would not work) and hand back the hashed URL.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import type { PaddingOptions } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
 import { activeTrains, klNow, network, prepare } from '../sim'
@@ -29,6 +44,8 @@ import { setMs, useClock, useView } from '../ui/store'
 // The OpenFreeMap "liberty" style already ships a `building-3d` fill-extrusion
 // layer (minzoom 14), so there is nothing for us to add — just zoom in past 14.
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty'
+
+setWorkerUrl(maplibreWorkerUrl)
 
 const MODE_KEY = 'kl-rail.map-mode'
 

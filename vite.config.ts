@@ -3,6 +3,10 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // MapLibre creates its worker with `{ type: 'module' }`, so the worker Vite
+  // emits has to be an ES module too. The default is an IIFE, which that
+  // constructor refuses.
+  worker: { format: 'es' },
   optimizeDeps: {
     // MapLibre spawns its tile worker from a URL relative to its own module.
     // Vite's dep optimizer copies the module into node_modules/.vite/deps and
