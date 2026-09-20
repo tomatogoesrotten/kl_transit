@@ -94,6 +94,25 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
 .card, .lines, .chooser { flex: 0 1 auto; }
 
 /* The time bar: the clock, and every control that changes which moment is shown. */
+/* The controls fold away: expanded they are most of a phone screen. The clock
+   is the summary, so it is always there and the toggle is always in the same
+   place. */
+.controls > summary {
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer; list-style: none; user-select: none;
+}
+.controls > summary::-webkit-details-marker { display: none; }
+/* A caret that turns, drawn after the clock so it never moves when the clock
+   text changes width. */
+.controls > summary::after {
+  content: 'B8'; margin-left: auto; color: #aaa;
+  transition: transform 0.15s;
+}
+.controls[open] > summary::after { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .controls > summary::after { transition: none; }
+}
+
 .timebar {
   align-self: stretch;
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;

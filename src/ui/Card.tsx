@@ -81,6 +81,20 @@ export function Card() {
         }}
       />
 
+      {/* The card's primary action, directly under what the train is doing. It
+          used to sit below the five-row table, which on a short card meant
+          scrolling to reach the one button most people want. */}
+      <button
+        className="btn"
+        aria-pressed={following}
+        onClick={toggleFollow}
+        ref={(el) => {
+          panels.follow = el
+        }}
+      >
+        {following ? 'Stop following' : 'Follow this train'}
+      </button>
+
       <table
         ref={(el) => {
           panels.table = el
@@ -114,16 +128,6 @@ export function Card() {
       {/* The honesty rule, on the one panel that gives times to the second. */}
       <p className="sched">Scheduled from the published timetable, not a live feed.</p>
 
-      <button
-        className="btn"
-        aria-pressed={following}
-        onClick={toggleFollow}
-        ref={(el) => {
-          panels.follow = el
-        }}
-      >
-        {following ? 'Stop following' : 'Follow this train'}
-      </button>
     </aside>
   )
 }

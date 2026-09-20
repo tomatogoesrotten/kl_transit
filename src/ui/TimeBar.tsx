@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { hhmm } from '../sim'
 import type { DayType } from '../sim'
 import { readout } from './readout'
@@ -6,6 +6,22 @@ import { useClock } from './store'
 import type { Speed } from './store'
 
 const SPEEDS: Speed[] = [1, 10, 60]
+
+const OPEN_KEY = 'kl-rail.controls-open'
+
+/**
+ * Whether the controls start expanded. Collapsed by default: expanded, the bar
+ * is most of a phone screen, and the clock on its own already answers the
+ * question the map raises. Wrapped, because a browser that refuses storage must
+ * still work - the same reason the map mode's read is wrapped.
+ */
+function readOpen(): boolean {
+  try {
+    return localStorage.getItem(OPEN_KEY) === 'open'
+  } catch {
+    return false
+  }
+}
 
 /**
  * The time bar: what moment is being shown, and every control that changes it.
@@ -30,6 +46,16 @@ export function TimeBar() {
   const { now, togglePause, setSpeed, setOverride, scrubTo, jumpToPeak } = useClock.getState()
 
   const slider = useRef<HTMLInputElement>(null)
+  const [open, setOpenState] = useState(readOpen)
+
+  function setOpen(next: boolean) {
+    setOpenState(next)
+    try {
+      localStorage.setItem(OPEN_KEY, next ? 'open' : 'shut')
+    } catch {
+      // A browser that will not remember still works; it just will not remember.
+    }
+  }
 
   useEffect(() => {
     const el = slider.current
@@ -75,7 +101,18 @@ export function TimeBar() {
         </button>
       </p>
 
-      <div className="clock">
+      {/* Collapsed by default: expanded it is most of a phone screen, and the
+          clock alone answers "when am I looking at". A native <details>, like
+          the caption and the lines panel, so the toggle is the browser's. The
+          frame loop's writes are all null-guarded, so the slider being absent
+          while collapsed is safe. */}
+      <details
+        className="controls"
+        open={open}
+        onToggle={(e) => setOpen(e.currentTarget.open)}
+      >
+        <summary>
+          <div className="clock">
         <time
           ref={(el) => {
             readout.time = el
@@ -104,6 +141,8 @@ export function TimeBar() {
           }}
         />
       </div>
+
+        </summary>
 
       <div className="scrub">
         {/* Uncontrolled. A `value` fed from state updated once a second yanks
@@ -165,6 +204,7 @@ export function TimeBar() {
           <option value="Sun">Timetable: Sunday</option>
         </select>
       </div>
+      </details>
     </footer>
   )
 }
