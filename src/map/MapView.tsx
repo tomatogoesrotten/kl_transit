@@ -221,9 +221,14 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   // The last camera padding applied, so a one-shot move to a station is framed
   // in the same visible box the follow camera centres in.
   const padding = useRef<PaddingOptions>({ top: 0, right: 0, bottom: 0, left: 0 })
-  // True while a pointer is down on the map. Read by the frame loop, so a ref
-  // rather than state: it changes on every press and must not re-render.
-  const steering = useRef(false)
+  // Which pointers are currently down on the map. Read by the frame loop, so a
+  // ref rather than state: it changes on every press and must not re-render.
+  //
+  // A set rather than a flag, because touch rotation uses two fingers: with a
+  // flag, the first finger lifting clears it while the second is still down, the
+  // camera resumes mid-gesture, and the twist dies. A set also survives a
+  // pointer whose release is never delivered, since the id simply never returns.
+  const steering = useRef(new Set<number>())
 
   useEffect(() => {
     const m = new Map({
@@ -330,10 +335,10 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // in the cleanup, or React's development double-mount leaves two behind.
     const notePointer = (e: PointerEvent) => {
       coarse.current = e.pointerType !== 'mouse'
-      steering.current = true
+      steering.current.add(e.pointerId)
     }
-    const releasePointer = () => {
-      steering.current = false
+    const releasePointer = (e: PointerEvent) => {
+      steering.current.delete(e.pointerId)
     }
     m.getContainer().addEventListener('pointerdown', notePointer)
     window.addEventListener('pointerup', releasePointer)
@@ -602,7 +607,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       if (view.following && view.selection?.kind === 'train') {
         const train = findTrain(shown, view.selection)
         const drawn = train && instanceOf(byMode, train.id)
-        if (drawn && !steering.current) {
+        if (drawn && steering.current.size === 0) {
           // A jump every frame, closing part of the gap — see FOLLOW_MS. The
           // zoom, pitch and bearing are left exactly as the viewer set them.
           const centre = m.getCenter()
