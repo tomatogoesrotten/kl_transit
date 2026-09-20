@@ -104,7 +104,7 @@
       keyboard panning works — which finally makes the prototype's aria-label true.
 - [x] 8.4 Run `npm test` and `npm run build`; both must pass with the existing 164 tests green, and
       `npm audit` at 0.
-- [ ] 8.5 **Look at it in a browser**: hover and click trains and stations, follow one and drag to
+- [x] 8.5 **Look at it in a browser**: hover and click trains and stations, follow one and drag to
       cancel, hide a line that shares track, and check it at phone width. Not done until a human has
       seen it.
 - [x] 8.6 Update `CLAUDE.md`'s Status, and open a pull request referencing issue #22 with
