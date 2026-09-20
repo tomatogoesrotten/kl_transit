@@ -106,12 +106,21 @@ from the browser: the timetable is compiled into the bundle at build time.
 | | |
 |---|---|
 | Build command | `npm run build` |
-| Output directory | `dist` |
+| Output directory | `dist`, declared in `wrangler.toml` |
+| Deploy command | `npx wrangler deploy` |
 | Node version | `.node-version` (currently 22.23.2) |
 
 These live here rather than only in a hosting dashboard, which nobody else can see, nobody can
-review, and which is gone with the account. A host should be pointed at this file, not configured
-instead of it.
+review, and which is gone with the account. A host should be pointed at these files, not configured
+instead of them.
+
+It deploys as a Cloudflare Worker serving static assets, rather than as a Pages project. Cloudflare
+has merged the two, and this is the shape that has somewhere for version 2 to go: the bus-feed proxy
+needs a small server, and on this platform it becomes a `main` script in the same Worker, serving
+the same assets, instead of a second thing to deploy and keep in step.
+
+Nothing here is Cloudflare-specific beyond that file. The build output is an ordinary static
+directory and any host will serve it.
 
 A first visit costs **2.7 MB of files, about 740 KB over the wire** once the server compresses them,
 before any map tiles. Almost all of it is one JavaScript bundle: MapLibre, deck.gl, React, and the
