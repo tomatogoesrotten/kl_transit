@@ -266,7 +266,25 @@ select.btn { padding: 7px 8px; }
 .card td { padding: 4px 0; border-top: 1px solid #333; }
 .card td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .card .sched { margin: 9px 0 0; color: #aaa; font-size: 11px; }
-.card .btn { margin-top: 8px; }
+/* The card's action is the thing most people opened the card for, so it is
+   filled rather than left as the default dark grey. That grey is #2b2b2b
+   against the card's near-black, which is nearly no contrast at all - and the
+   card sits over a light map, so it renders lighter than the time bar does and
+   loses what little there was. It read as plain text, not a button.
+   Inverted from the shared rule on purpose: `aria-pressed="true"` normally
+   fills a button, which would have made this bright while following and
+   invisible while inviting you to follow. Following is a state to leave, not a
+   call to action, so it is the calmer of the two. */
+.card .btn {
+  margin-top: 8px;
+  background: #f0f2f4; color: #15202b;
+}
+.card .btn:hover { background: #fff; }
+.card .btn[aria-pressed="true"] {
+  background: transparent; color: #eee;
+  box-shadow: inset 0 0 0 1.5px #6b7480;
+}
+.card .btn[aria-pressed="true"]:hover { background: rgba(255, 255, 255, 0.08); }
 /* The frame loop hides the rows it has nothing for, and the follow button when
    there is no running train to follow. `display` has to be said for a table row. */
 .card [hidden] { display: none; }
