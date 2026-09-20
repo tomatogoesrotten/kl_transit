@@ -8,6 +8,7 @@ import {
   lineLayer,
   networkLayers,
   stationDots,
+  stationLayer,
 } from './layers'
 import { gapMetres, offsetAt, offsetPoint, sharedCorridors } from './offset'
 
@@ -96,6 +97,24 @@ describe('the station layer', () => {
     )
     expect(stations.props.data).toHaveLength(total)
     expect(total).toBe(stationDots(rail, corridors, GAP).length)
+  })
+
+  it('fills a marker while a train stands at it, and leaves the rest clear', () => {
+    // Milestone 4's one visible signal, and the station models and beacons
+    // added around it must not take it away. `filled` is a layer-level
+    // property, so the fill is always drawn and made transparent when idle —
+    // an opaque idle fill would punch a hole in the city underneath.
+    const dots = stationDots(rail, corridors, GAP)
+    dots[0].busy = true
+    const getFillColor = accessor<(typeof dots)[number], number[]>(
+      stationLayer(dots, 'test-label-layer', 1).props.getFillColor,
+    )
+    expect(getFillColor(dots[0])).toEqual(dots[0].color)
+    expect(getFillColor(dots[1])).toEqual([0, 0, 0, 0])
+    // And the layer is told the set changed, or deck.gl keeps the colours it
+    // already uploaded: `dots` is one array mutated in place.
+    expect(stationLayer(dots, 'test-label-layer', 2).props.updateTriggers.getFillColor).toBe(2)
+    dots[0].busy = false
   })
 
   it('puts a station on the track, not at its published coordinate', () => {

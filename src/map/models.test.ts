@@ -3,6 +3,10 @@ import brt from './models/brt.gltf?raw'
 import lrt from './models/lrt.gltf?raw'
 import mrl from './models/mrl.gltf?raw'
 import mrt from './models/mrt.gltf?raw'
+import stationBrt from './models/station-brt.gltf?raw'
+import stationLrt from './models/station-lrt.gltf?raw'
+import stationMrl from './models/station-mrl.gltf?raw'
+import stationMrt from './models/station-mrt.gltf?raw'
 
 /**
  * The models are build output, committed to the repo, and `npm run models`
@@ -16,15 +20,34 @@ import mrt from './models/mrt.gltf?raw'
  * silhouette in the line colour. See scripts/build_train_models.mjs.
  */
 
-/** The size each model is authored at, in metres: length, width, height. */
+/**
+ * The size each model is authored at, in metres: length, width, height.
+ *
+ * The stations are about twice as long and four times as wide as the train that
+ * stops at them, where a real platform is fifteen times as long as it is wide.
+ * The exaggeration is deliberate — see scripts/build_train_models.mjs.
+ */
 const EXPECTED: Record<string, [number, number, number]> = {
   lrt: [20.0, 4.4, 3.8],
   mrt: [22.4, 5.2, 4.0],
   mrl: [12.0, 3.2, 3.6],
   brt: [10.4, 3.2, 3.2],
+  'station-lrt': [34.0, 18.0, 7.2],
+  'station-mrt': [38.0, 20.0, 8.4],
+  'station-mrl': [26.0, 14.0, 6.0],
+  'station-brt': [18.0, 13.0, 5.0],
 }
 
-const FILES = { lrt, mrt, mrl, brt }
+const FILES = {
+  lrt,
+  mrt,
+  mrl,
+  brt,
+  'station-lrt': stationLrt,
+  'station-mrt': stationMrt,
+  'station-mrl': stationMrl,
+  'station-brt': stationBrt,
+}
 
 /** A data-URI buffer, back into bytes. */
 function decode(uri: string): Uint8Array {
@@ -78,10 +101,12 @@ describe.each(Object.entries(FILES))('%s.gltf', (name, text) => {
     expect(size[2]).toBeCloseTo(EXPECTED[name][2], 3)
   })
 
-  it('points its nose along +X and sits on z = 0', () => {
+  it('lies along +X and sits on z = 0', () => {
     // The convention `yawFor` and the viaduct height both assume: travel along
     // +X, left along +Y, up from zero. A Blender export with "+Y Up" left on
     // would fail this, and would otherwise just lie on its side in the city.
+    // A station is oriented by the track it stands on, so it follows the same
+    // convention: its platforms run along +X, not across it.
     const { min, max } = gltf.accessors[prim.attributes.POSITION]
     expect(min[2]).toBeCloseTo(0, 6)
     expect(min[0]).toBeCloseTo(-max[0], 6)

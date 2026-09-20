@@ -44,8 +44,13 @@ const KEEP_LEFT = 0.8
  * so the layer's scale is simply `W / 4`. See `scripts/build_train_models.mjs`
  * for the dimensions themselves and why they are shorter and wider than real
  * rolling stock.
+ *
+ * The station models are authored against the same unit and scaled by the same
+ * `W / MODEL_W` — which is why `places.ts` imports this rather than keeping a
+ * second copy of the number. A station and the train standing at it then hold
+ * their proportions however far away the camera is.
  */
-const MODEL_W = 4
+export const MODEL_W = 4
 
 /** The four modes the feed uses, and the model each one is drawn with. */
 export const MODEL_URL: Record<Mode, string> = {

@@ -51,6 +51,13 @@ export interface StationDot {
   /** The line this marker belongs to, so a pick knows which timetable to read. */
   line: string
   position: [lon: number, lat: number, z: number]
+  /**
+   * The compass bearing of the track here, which `pointAt` has already worked
+   * out for the position above. Carried rather than recomputed because the
+   * station models are laid along the track, and a second `pointAt` call for
+   * the same stop would be the same arithmetic twice.
+   */
+  bearing: number
   color: [number, number, number]
   /**
    * True while a train is standing at this platform. Mutated in place by the
@@ -108,7 +115,14 @@ export function stationDots(
       const p = pointAt(line, stop.at, false)
       const slot = offsetAt(corridors, line.id, stop.at)
       const [lon, lat] = slot === 0 ? [p.lon, p.lat] : keepLeft(p, line.origin, slot * gap)
-      dots.push({ id: stop.id, line: line.id, position: [lon, lat, z], color, busy: false })
+      dots.push({
+        id: stop.id,
+        line: line.id,
+        position: [lon, lat, z],
+        bearing: p.bearingDeg,
+        color,
+        busy: false,
+      })
     }
   }
   return dots

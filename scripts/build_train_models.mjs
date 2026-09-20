@@ -1,4 +1,5 @@
-// Builds one glTF 2.0 model per transit mode into src/map/models/.
+// Builds one glTF 2.0 vehicle model and one station model per transit mode
+// into src/map/models/.
 //
 //     npm run models
 //
@@ -35,6 +36,8 @@
 // ---------------------------------------------------------------------------
 // - One unit is one metre, and the model is authored at the size the train is
 //   drawn when the camera is close (deck.gl scales it by W / 4 from there).
+//   Station models are authored against the same W / 4, so a station and the
+//   train standing at it keep their proportions at every zoom.
 // - +X is the direction of travel, +Y is to the left of it, +Z is up. Note
 //   that this is NOT glTF's usual Y-up: deck.gl applies no axis conversion, so
 //   a Blender export needs its "+Y Up" option turned OFF.
@@ -117,14 +120,23 @@ function quad(m, a, b, c, d, shade) {
   m.idx.push(i, i + 1, i + 2, i, i + 2, i + 3)
 }
 
-/** A plain rectangular box, used for the monorail's beam and the bus's joint. */
+/**
+ * An axis-aligned box, with the top and bottom faces optionally in their own
+ * shade — a station roof is the line colour seen from above and dark from
+ * underneath, and one shade for all six faces cannot say that.
+ */
+function cuboid(m, xa, xb, y0, y1, z0, z1, shade, top = shade, bottom = shade) {
+  quad(m, [xa, y1, z0], [xb, y1, z0], [xb, y1, z1], [xa, y1, z1], shade)
+  quad(m, [xa, y0, z1], [xb, y0, z1], [xb, y0, z0], [xa, y0, z0], shade)
+  quad(m, [xa, y1, z1], [xb, y1, z1], [xb, y0, z1], [xa, y0, z1], top)
+  quad(m, [xa, y0, z0], [xb, y0, z0], [xb, y1, z0], [xa, y1, z0], bottom)
+  quad(m, [xa, y1, z0], [xa, y0, z0], [xa, y0, z1], [xa, y1, z1], shade)
+  quad(m, [xb, y0, z0], [xb, y1, z0], [xb, y1, z1], [xb, y0, z1], shade)
+}
+
+/** A box centred on the centre line, used for the monorail's beam and the bus's joint. */
 function box(m, xa, xb, hw, z0, z1, shade) {
-  quad(m, [xa, hw, z0], [xb, hw, z0], [xb, hw, z1], [xa, hw, z1], shade)
-  quad(m, [xa, -hw, z1], [xb, -hw, z1], [xb, -hw, z0], [xa, -hw, z0], shade)
-  quad(m, [xa, hw, z1], [xb, hw, z1], [xb, -hw, z1], [xa, -hw, z1], shade)
-  quad(m, [xa, -hw, z0], [xb, -hw, z0], [xb, hw, z0], [xa, hw, z0], shade)
-  quad(m, [xa, hw, z0], [xa, -hw, z0], [xa, -hw, z1], [xa, hw, z1], shade)
-  quad(m, [xb, -hw, z0], [xb, hw, z0], [xb, hw, z1], [xb, -hw, z1], shade)
+  cuboid(m, xa, xb, -hw, hw, z0, z1, shade)
 }
 
 /**
@@ -235,6 +247,79 @@ function bus({ length, width, height }) {
 }
 
 // --------------------------------------------------------------------------
+// Stations
+//
+// Two side platforms with the track left open between them. The open centre is
+// not decoration: trains are the thing that moves, and a canopy across the
+// whole width would hide a train standing at the platform from a camera looking
+// down at the city, which is where the camera spends its time. So each platform
+// carries its own roof and the middle stays clear.
+//
+// `inner` is where a platform starts, in metres from the centre line, and it
+// has to clear the train. A train sits 0.8 W to the left of the centre and is
+// drawn at W / 4; a station is drawn at the same W / 4, so a clearance that
+// works at the size authored here works at every zoom. The one exception is a
+// stretch two lines share, where a train carries an extra sideways offset
+// measured in pixels rather than in W — there a train clips the platform edge
+// by a metre or two. Twelve stations on the Ampang corridor, a pixel or two
+// each: noted rather than fixed.
+// --------------------------------------------------------------------------
+
+function station({
+  length,
+  width,
+  height,
+  inner,
+  deck,
+  roof,
+  wall = false,
+  gables = false,
+  span = 1,
+  beam = 0,
+}) {
+  const m = mesh()
+  const hw = width / 2
+  const x0 = -length / 2
+  const x1 = length / 2
+  // How much of the length the roof covers. A bus stop is a shelter in the
+  // middle of its platform, not a train shed.
+  const r0 = (-length * span) / 2
+  const r1 = (length * span) / 2
+
+  for (const side of [1, -1]) {
+    const y0 = side > 0 ? inner : -hw
+    const y1 = side > 0 ? hw : -inner
+    // The deck: dark at the edges, lighter on top where people stand.
+    cuboid(m, x0, x1, y0, y1, 0, deck, UNDER, SKIRT)
+    if (wall) {
+      // The outer wall, in two bands. At the size a station is drawn — about
+      // thirty pixels long — a glazed band is a line of colour, and a line of
+      // colour is the most detail that survives.
+      const wy0 = side > 0 ? hw - 0.7 : -hw
+      const wy1 = side > 0 ? hw : -hw + 0.7
+      const sill = deck + (roof - deck) * 0.45
+      cuboid(m, x0, x1, wy0, wy1, deck, sill, SKIRT)
+      cuboid(m, x0, x1, wy0, wy1, sill, roof, GLASS)
+    }
+    // The roof: the line colour from above, dark from underneath.
+    cuboid(m, r0, r1, y0, y1, roof, height, BODY, ROOF, UNDER)
+  }
+
+  // End frames, which is what makes an MRT station read as one enclosed box
+  // rather than as two platforms that happen to be side by side.
+  if (gables) {
+    cuboid(m, x0, x0 + 1.6, -hw, hw, deck, height, BODY, ROOF, UNDER)
+    cuboid(m, x1 - 1.6, x1, -hw, hw, deck, height, BODY, ROOF, UNDER)
+  }
+
+  // The monorail's beam, carried through the station the way its trains carry
+  // it, so the two line up instead of the train appearing to float.
+  if (beam) cuboid(m, x0, x1, -beam, beam, 0, deck * 1.5, UNDER)
+
+  return m
+}
+
+// --------------------------------------------------------------------------
 // The four modes
 //
 // Metres, at the size each is drawn when the camera is close. Every one is
@@ -244,11 +329,39 @@ function bus({ length, width, height }) {
 // is half what the boxes they replace held.
 // --------------------------------------------------------------------------
 
+// A station is roughly twice the length of the train that stops at it and four
+// times its width. A real platform is 150 m by 10 m — fifteen to one — which at
+// the zoom a station model is drawn is a sliver one pixel across. The
+// exaggeration is two to one instead, and it is deliberate: what survives at
+// thirty pixels is the footprint and the colour of the roof, nothing finer.
+//
+// The four LRT lines mean the LRT station is seen four times as often as any
+// other, so it is the one the proportions were chosen for; MRT is the same
+// structure, heavier and closed at the ends; the monorail is narrow, low and
+// straddles its beam; the bus stop is a shelter and nothing else.
+
 const MODELS = {
   lrt: () => train({ length: 20.0, width: 4.4, height: 3.8, cars: 4, gap: 0.34 }),
   mrt: () => train({ length: 22.4, width: 5.2, height: 4.0, cars: 4, gap: 0.36 }),
   mrl: () => monorail({ length: 12.0, width: 3.2, height: 3.6, cars: 2, gap: 0.28 }),
   brt: () => bus({ length: 10.4, width: 3.2, height: 3.2 }),
+  'station-lrt': () =>
+    station({ length: 34, width: 18, height: 7.2, inner: 5.6, deck: 1.0, roof: 6.4, wall: true }),
+  'station-mrt': () =>
+    station({
+      length: 38,
+      width: 20,
+      height: 8.4,
+      inner: 6.2,
+      deck: 1.1,
+      roof: 7.4,
+      wall: true,
+      gables: true,
+    }),
+  'station-mrl': () =>
+    station({ length: 26, width: 14, height: 6.0, inner: 4.9, deck: 0.9, roof: 5.4, beam: 0.42 }),
+  'station-brt': () =>
+    station({ length: 18, width: 13, height: 5.0, inner: 4.9, deck: 0.8, roof: 4.4, span: 0.5 }),
 }
 
 // --------------------------------------------------------------------------

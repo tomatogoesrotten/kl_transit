@@ -249,5 +249,15 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   ~135 km/h. It is measured against the timetable instead. Headroom today is 30.1 km/h.
 - Every feed check is proven to fail: `check:feed` breaks the data six ways on every run and asserts
   each specific check fires. The daily log carries that evidence.
-- Next: deploy to Cloudflare Pages, then issues #23 to #26 (merge interchanges, station models,
-  labels and filtering, the journey planner).
+- Deployed as a Cloudflare Worker serving static assets. Two fixes keep the map drawing at all, one
+  per build — see the MapLibre worker note in the stack section. `ls dist/assets | grep worker` must
+  list a chunk of roughly half a megabyte.
+- Stations are marked twice over. The per-line RINGS carry which line a platform belongs to and
+  whether a train is standing at it (Milestone 4) and must not be replaced. The MODEL and BEACON are
+  per PLACE — stops grouped by name, 187 into 160 — and say only "a station is here". Four rings at
+  Titiwangsa are correct; four models would be a pile.
+- A place's position comes from its stops' DRAWN positions, computed in the same pass as the station
+  dots. Not the feed's coordinates, and not a fresh `pointAt`: either misses the corridor offset and
+  the camera-dependent gap, and the marker drifts off the track as the zoom changes.
+- Next: issues #23, #25 and #26 (merge interchanges, labels and filtering, the journey planner), and
+   #35, where rotating while following still does not work on touch.

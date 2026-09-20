@@ -25,6 +25,14 @@ import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
 import {
+  beaconHeight,
+  beaconLayer,
+  crossfade,
+  stationModelLayers,
+  stationPlaces,
+} from './places'
+import type { Place } from './places'
+import {
   busyStations,
   halfWidth,
   lineColors,
@@ -129,6 +137,12 @@ interface Statics {
   // and shadows the built-in one for the whole module.
   index: ReturnType<typeof stationIndex>
   stations: ReturnType<typeof stationLayer>
+  /**
+   * One entry per named station, however many lines call there — what the
+   * models and the beacons are drawn from. Rebuilt with `dots`, because its
+   * positions come from theirs.
+   */
+  places: Place[]
   busyVersion: number
   /** The hidden set the layers above were built from. Compared by identity. */
   hidden: ReadonlySet<string>
@@ -457,6 +471,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             dots,
             index: stationIndex(dots),
             stations: stationLayer(dots, beforeId, 0),
+            places: stationPlaces(rail, dots),
             busyVersion: 0,
             hidden,
           }
@@ -576,6 +591,11 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         // on all of them — so the loop below has to write it again.
         s.dots = cam.dots
         s.index = stationIndex(cam.dots)
+        // A place sits at the mean of its own platforms' DRAWN positions, so it
+        // is rebuilt exactly when they move and never in between. Here rather
+        // than inside `cameraLayers` only to keep layers.ts and places.ts from
+        // importing each other.
+        s.places = stationPlaces(rail, cam.dots)
         changed = true
       }
 
@@ -626,10 +646,27 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         }
       }
 
+      // Model close, beacon far, and the bands overlap so the sum never dips —
+      // two things at half strength read as one faint thing, not as a
+      // transition. See `crossfade`.
+      const fade = crossfade(zoom)
+
       // Straight to deck.gl, never through React state. The two static layers go
       // back as the same instances; only the trains are new.
+      //
+      // Order is draw order. The beacons come last because they are the only
+      // translucent thing here, and translucency blends over what is already
+      // drawn. The station models go UNDER the trains, so that a train standing
+      // at a platform is drawn over its own station rather than into it.
       deck.setProps({
-        layers: [s.lines, cam.shared, s.stations, ...trainLayers(byMode, W, s.beforeId)],
+        layers: [
+          s.lines,
+          cam.shared,
+          s.stations,
+          ...stationModelLayers(s.places, W, fade.model, s.beforeId),
+          ...trainLayers(byMode, W, s.beforeId),
+          beaconLayer(s.places, W, beaconHeight(zoom, lat), fade.beacon, s.beforeId),
+        ],
       })
     }
     frame.current = requestAnimationFrame(tick)
