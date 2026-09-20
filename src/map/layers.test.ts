@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { network, pointAt, prepare } from '../sim'
 import type { PreparedLine } from '../sim'
-import { cameraLayers, hexToRgb, labelLayerId, networkLayers, stationDots } from './layers'
+import {
+  cameraLayers,
+  hexToRgb,
+  labelLayerId,
+  lineLayer,
+  networkLayers,
+  stationDots,
+} from './layers'
 import { gapMetres, offsetAt, offsetPoint, sharedCorridors } from './offset'
 
 const rail = prepare(network)
@@ -73,6 +80,14 @@ describe('the line layers', () => {
 
 describe('the station layer', () => {
   const stations = layers[2]
+
+  it('answers picks, where the track deliberately does not', () => {
+    // A track is large and it is everywhere near a line, so a pickable one
+    // would answer instead of the train standing on it.
+    expect(stations.props.pickable).toBe(true)
+    expect(layers[0].props.pickable).toBe(false)
+    expect(layers[1].props.pickable).toBe(false)
+  })
 
   it('draws every stop of every line, duplicates and all', () => {
     const total = rail.lines.reduce(
@@ -228,5 +243,51 @@ describe('labelLayerId', () => {
 
   it('says so rather than guessing when a style has no labels', () => {
     expect(labelLayerId(liberty.filter((l) => l.type !== 'symbol'))).toBeUndefined()
+  })
+})
+
+describe('hiding a line', () => {
+  const build = cameraLayers(rail, corridors, 'test-label-layer')
+
+  it('takes its track and its stations out of the data', () => {
+    const hidden = new Set(['AG'])
+    const cam = build(13, 3.146, hidden)
+    expect((cam.shared.props.data as PreparedLine[]).map((l) => l.id)).toEqual(['PH'])
+    expect(cam.dots.some((dot) => dot.line === 'AG')).toBe(false)
+    expect(cam.dots.some((dot) => dot.line === 'PH')).toBe(true)
+
+    // And the lines that share track with nobody, which live in their own layer.
+    const plain = lineLayer(rail, corridors, 'test-label-layer', new Set(['KJ']))
+    expect((plain.props.data as PreparedLine[]).some((l) => l.id === 'KJ')).toBe(false)
+  })
+
+  it('leaves its partner exactly where it was drawn', () => {
+    // The corridors are worked out once from the WHOLE network. Recomputing
+    // them from the visible subset would put Sri Petaling back on the centre
+    // line the moment Ampang was switched off - 8.5 km of track moving
+    // sideways because of a checkbox.
+    const withBoth = build(13, 3.146)
+    const getPath = accessor<PreparedLine, [number, number, number][]>(
+      withBoth.shared.props.getPath,
+    )
+    const before = getPath(
+      (withBoth.shared.props.data as PreparedLine[]).find((l) => l.id === 'PH')!,
+    )
+    const phBefore = withBoth.dots.filter((dot) => dot.line === 'PH').map((d) => d.position)
+
+    const alone = build(13, 3.146, new Set(['AG']))
+    const after = accessor<PreparedLine, [number, number, number][]>(alone.shared.props.getPath)(
+      (alone.shared.props.data as PreparedLine[]).find((l) => l.id === 'PH')!,
+    )
+    expect(after).toEqual(before)
+    expect(alone.dots.filter((dot) => dot.line === 'PH').map((d) => d.position)).toEqual(phBefore)
+  })
+
+  it('rebuilds only when the hidden set changes', () => {
+    const hidden = new Set(['AG'])
+    const a = build(14, 3.146, hidden)
+    const b = build(14, 3.146, hidden)
+    expect(b).toBe(a)
+    expect(build(14, 3.146, new Set(['AG']))).not.toBe(a)
   })
 })

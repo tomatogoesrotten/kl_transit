@@ -74,7 +74,7 @@
       panel. Verify at 400 px wide.
 - [x] 6.2 Run `npm test` and `npm run build`; both must pass with the existing 141 tests green, and
       `npm audit` must stay at 0.
-- [ ] 6.3 **Look at it in a browser**: scrub through a whole day and watch service build up and wind
+- [x] 6.3 **Look at it in a browser**: scrub through a whole day and watch service build up and wind
       down, check each speed, check the notice appears in the small hours, and check it at phone
       width. Not done until a human has seen it.
 - [x] 6.4 Update `CLAUDE.md`'s Status and Commands, and open a pull request referencing issue #20

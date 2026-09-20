@@ -48,6 +48,8 @@ function elevationOf(rail: PreparedNetwork, line: PreparedLine): number {
 
 export interface StationDot {
   id: string
+  /** The line this marker belongs to, so a pick knows which timetable to read. */
+  line: string
   position: [lon: number, lat: number, z: number]
   color: [number, number, number]
   /**
@@ -65,6 +67,9 @@ export interface StationDot {
  */
 const IDLE: [number, number, number, number] = [0, 0, 0, 0]
 
+/** Nothing hidden. One shared instance, so the "did it change" test stays an identity test. */
+const EMPTY: ReadonlySet<string> = new Set<string>()
+
 /**
  * One dot per stop per line, placed on the track.
  *
@@ -80,10 +85,21 @@ const IDLE: [number, number, number, number] = [0, 0, 0, 0]
  *
  * Stations shared by two lines appear once per line. That is the feed being
  * honest about per-line stop ids; merging them is later work.
+ *
+ * `hidden` drops whole lines from the data. It never touches `corridors`: those
+ * are computed once from the whole network, and recomputing them from the
+ * visible subset would move a line 8.5 km sideways because its neighbour was
+ * switched off.
  */
-export function stationDots(rail: PreparedNetwork, corridors: Corridors, gap: number): StationDot[] {
+export function stationDots(
+  rail: PreparedNetwork,
+  corridors: Corridors,
+  gap: number,
+  hidden: ReadonlySet<string> = EMPTY,
+): StationDot[] {
   const dots: StationDot[] = []
   for (const line of rail.lines) {
+    if (hidden.has(line.id)) continue
     const color = hexToRgb(line.color)
     const z = elevationOf(rail, line)
     const forward = line.directions.find((d) => d.dir === 0)
@@ -92,7 +108,7 @@ export function stationDots(rail: PreparedNetwork, corridors: Corridors, gap: nu
       const p = pointAt(line, stop.at, false)
       const slot = offsetAt(corridors, line.id, stop.at)
       const [lon, lat] = slot === 0 ? [p.lon, p.lat] : keepLeft(p, line.origin, slot * gap)
-      dots.push({ id: stop.id, position: [lon, lat, z], color, busy: false })
+      dots.push({ id: stop.id, line: line.id, position: [lon, lat, z], color, busy: false })
     }
   }
   return dots
@@ -104,6 +120,11 @@ export function stationDots(rail: PreparedNetwork, corridors: Corridors, gap: nu
  * `updateTriggers` on `getPath` because the accessor closes over `gap`, which
  * changes with the zoom: without it deck.gl would see the same `data` array and
  * keep the geometry it already tessellated.
+ *
+ * NOT pickable, and deliberately so: a track is large and it is everywhere near
+ * a line, so if it answered a pick it would answer instead of the train
+ * standing on it. deck.gl's default is already unpickable — this note is here
+ * so that nobody switches it on for symmetry with the other layers.
  */
 function trackLayer(
   id: string,
@@ -137,8 +158,13 @@ function trackLayer(
  * own so that moving the offset lines — which happens on every zoom change —
  * does not re-tessellate thousands of vertices that did not move.
  */
-export function lineLayer(rail: PreparedNetwork, corridors: Corridors, beforeId: string) {
-  const plain = rail.lines.filter((line) => !corridors.has(line.id))
+export function lineLayer(
+  rail: PreparedNetwork,
+  corridors: Corridors,
+  beforeId: string,
+  hidden: ReadonlySet<string> = EMPTY,
+) {
+  const plain = rail.lines.filter((line) => !corridors.has(line.id) && !hidden.has(line.id))
   return trackLayer('lines', plain, rail, corridors, 0, beforeId)
 }
 
@@ -148,8 +174,9 @@ export function sharedLineLayer(
   corridors: Corridors,
   gap: number,
   beforeId: string,
+  hidden: ReadonlySet<string> = EMPTY,
 ) {
-  const shared = rail.lines.filter((line) => corridors.has(line.id))
+  const shared = rail.lines.filter((line) => corridors.has(line.id) && !hidden.has(line.id))
   return trackLayer('shared-lines', shared, rail, corridors, gap, beforeId)
 }
 
@@ -162,12 +189,18 @@ export function sharedLineLayer(
  * `dots` is a single array mutated in place, which deck.gl cannot see into.
  * `busyVersion` is how it is told: bump it when the busy set changes, and leave
  * it alone when it has not.
+ *
+ * Pickable, so a station can be inspected. A train standing at the platform
+ * still wins the pick, because trains are drawn at `VIADUCT_M` and these
+ * markers at a fraction of a metre — the elevation is load-bearing, not
+ * decorative. See the note on `VIADUCT_M` in trains.ts.
  */
 export function stationLayer(dots: StationDot[], beforeId: string, busyVersion: number) {
   return new ScatterplotLayer<StationDot, Interleaved>({
     id: 'stations',
     data: dots,
     beforeId,
+    pickable: true,
     getPosition: (d) => d.position,
     getLineColor: (d) => d.color,
     filled: true,
@@ -206,21 +239,28 @@ export interface CameraLayers {
  * through `cos(lat)`, and the Klang Valley spans 0.3 degrees at latitude 3, so
  * panning across the whole city moves the gap by less than a fiftieth of a
  * percent.
+ *
+ * The set of hidden lines is the second trigger, for the same reason and with
+ * the same treatment: it changes which lines are in the data, so the geometry
+ * has to be rebuilt — but only when it changes, which is when somebody presses
+ * a checkbox. Compared by identity, so the store hands out a new Set each time.
  */
 export function cameraLayers(
   rail: PreparedNetwork,
   corridors: Corridors,
   beforeId: string,
-): (zoom: number, lat: number) => CameraLayers {
+): (zoom: number, lat: number, hidden?: ReadonlySet<string>) => CameraLayers {
   let lastZoom = NaN
+  let lastHidden: ReadonlySet<string> = EMPTY
   let built: CameraLayers | null = null
-  return (zoom, lat) => {
-    if (!built || zoom !== lastZoom) {
+  return (zoom, lat, hidden = EMPTY) => {
+    if (!built || zoom !== lastZoom || hidden !== lastHidden) {
       lastZoom = zoom
+      lastHidden = hidden
       const gap = gapMetres(zoom, lat)
       built = {
-        shared: sharedLineLayer(rail, corridors, gap, beforeId),
-        dots: stationDots(rail, corridors, gap),
+        shared: sharedLineLayer(rail, corridors, gap, beforeId, hidden),
+        dots: stationDots(rail, corridors, gap, hidden),
         gap,
       }
     }

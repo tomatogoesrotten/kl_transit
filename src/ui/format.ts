@@ -15,6 +15,32 @@ export function hhmmss(sec: number): string {
   return `${pad(s / 3600)}:${pad((s % 3600) / 60)}:${pad(s % 60)}`
 }
 
+/**
+ * A wait, said the way a person would say it: "now", "35 s", "4 min".
+ *
+ * Ported from the prototype. Nothing under twenty seconds is worth a number,
+ * and the five-second rounding in between stops a countdown flickering through
+ * every value on its way down.
+ */
+export function dur(sec: number): string {
+  if (sec < 20) return 'now'
+  if (sec < 90) return `${Math.round(sec / 5) * 5} s`
+  return `${Math.round(sec / 60)} min`
+}
+
+/**
+ * Near-black or white, whichever can be read on top of a line's own colour.
+ *
+ * The feed's palette runs from a pale monorail green to a dark KTM blue, so one
+ * fixed text colour is unreadable on one end or the other. Relative luminance,
+ * with the prototype's threshold.
+ */
+export function ink(hex: string): string {
+  const n = parseInt(hex.slice(1), 16)
+  const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)
+  return lum > 158 ? '#15202b' : '#ffffff'
+}
+
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 

@@ -1,14 +1,43 @@
-html, body, #root { height: 100%; margin: 0; }
+/* Padding must not add to width. Without this, `.card { width: 100%; padding:
+   12px 14px }` is 28px wider than the column it sits in and pushes the page off
+   the screen, and a 46px pill in a 46px grid track is really 56px and lands on
+   top of the line name. Both of those shipped. */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* The map fills the window; nothing here is a document to scroll. A page that
+   can scroll hides a layout fault instead of showing it. */
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
 
+/* What this is and what it is honestly claiming. A native <details>, so it
+   collapses to the information mark alone when it is in the way.
+
+   `pointer-events: none` on the panel and `auto` on the summary: the map has to
+   stay draggable through the three lines of text, and giving the whole panel
+   its events back would put a dead zone over the middle of the city. */
 .caption {
   position: absolute; left: 10px; top: 10px; z-index: 1;
+  max-width: min(34ch, calc(100vw - 20px));
   padding: 8px 12px; border-radius: 8px;
   background: rgba(17, 17, 17, 0.8); backdrop-filter: blur(4px);
   pointer-events: none;
 }
-.caption strong { display: block; font-size: 15px; }
-.caption span { display: block; color: #aaa; font-size: 12px; max-width: 34ch; }
+.caption > summary {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; cursor: pointer; list-style: none; user-select: none;
+  pointer-events: auto;
+}
+.caption > summary::-webkit-details-marker { display: none; }
+.caption > summary:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.caption .i {
+  display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 20px; height: 20px; border: 1px solid #999; border-radius: 50%;
+  color: #ddd; font: italic 700 12px/1 Georgia, serif;
+}
+/* Collapsed: the mark, and nothing else. */
+.caption:not([open]) { padding: 6px; }
+.caption:not([open]) strong { display: none; }
+.caption span { display: block; margin-top: 4px; color: #aaa; font-size: 12px; }
 
 /* Below MapLibre's navigation control (three 29px buttons, 10px in from the top
    right), so the two never overlap — nor the caption, which is top left. */
@@ -31,15 +60,76 @@ body { font: 14px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
   background: rgba(120, 30, 30, 0.9); color: #fff;
 }
 
-/* The time bar: the clock, and every control that changes which moment is shown.
-   Full width along the bottom, but held 34px up so MapLibre's attribution — the
-   OpenStreetMap credit CLAUDE.md requires — stays visible underneath it. The
-   left of the screen above it is left empty on purpose: that is Milestone 6's
-   lines panel. */
-.timebar {
+/* The bottom-left column: the card (at phone width), the lines panel, and the
+   time bar under them. Held 34px up so MapLibre's attribution — the OpenStreetMap
+   credit CLAUDE.md requires — stays visible underneath it.
+
+   One column, laid out by the browser, and that is the whole point of it. The
+   time bar's height is not fixed: it wraps at narrow widths and grows a whole
+   row when the no-trains notice appears. So nothing above it can be positioned
+   by a hardcoded offset from the bottom, and the alternative — measuring the bar
+   with getBoundingClientRect on every resize and every panel toggle, as the
+   prototype did — is replaced here by nothing at all. */
+.bottom-left {
   position: absolute; left: 10px; right: 10px; bottom: 34px; z-index: 1;
+  /* Never taller than the viewport it sits in. With a cap the panels below can
+     shrink and scroll inside themselves; without one the column simply runs off
+     the top of a short screen. */
+  max-height: calc(100% - 44px);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+  /* The column spans the width but only its children should catch the pointer;
+     the gaps between them are map. */
+  pointer-events: none;
+}
+.bottom-left > * {
+  pointer-events: auto;
+  /* A flex child will not shrink below its own content unless it is told it
+     may. Without these three a wide card or a long station name pushes the
+     column past the edge of the screen, which is what it used to do. */
+  min-width: 0; min-height: 0; max-width: 100%;
+}
+/* The time bar is the one thing that must stay whole: it holds the clock and
+   every control. Everything above it gives way and scrolls inside itself. */
+.timebar { flex: 0 0 auto; }
+.card, .lines, .chooser { flex: 0 1 auto; }
+
+/* The time bar: the clock, and every control that changes which moment is shown. */
+/* The controls fold away: expanded they are most of a phone screen. The clock
+   is the summary, so it is always there and the toggle is always in the same
+   place. */
+/* The whole bar toggles, not just the clock. `.timebar` is a wrapping flex
+   row, so without a full-width basis the <details> is only as wide as the time
+   text and everything either side of it is dead. The negative margin pulls the
+   summary out over the bar's own padding, so there is no unclickable strip
+   around the edge either - `var(--bar-pad-*)` is set on `.timebar` and
+   overridden at phone width, so the two can never drift apart. */
+.controls { flex: 1 1 100%; }
+.controls > summary {
+  display: flex; align-items: center; gap: 10px;
+  margin: calc(var(--bar-pad-y) * -1) calc(var(--bar-pad-x) * -1);
+  padding: var(--bar-pad-y) var(--bar-pad-x);
+  border-radius: 8px;
+  cursor: pointer; list-style: none; user-select: none;
+}
+.controls > summary:hover { background: rgba(255, 255, 255, 0.06); }
+.controls[open] > summary { margin-bottom: 0; }
+.controls > summary::-webkit-details-marker { display: none; }
+/* A caret that turns, drawn after the clock so it never moves when the clock
+   text changes width. */
+.controls > summary::after {
+  content: 'B8'; margin-left: auto; color: #aaa;
+  transition: transform 0.15s;
+}
+.controls[open] > summary::after { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .controls > summary::after { transition: none; }
+}
+
+.timebar {
+  --bar-pad-y: 10px; --bar-pad-x: 12px;
+  align-self: stretch;
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
-  padding: 10px 12px; border-radius: 8px;
+  padding: var(--bar-pad-y) var(--bar-pad-x); border-radius: 8px;
   background: rgba(17, 17, 17, 0.8); backdrop-filter: blur(4px);
 }
 .timebar .clock { flex: 0 0 auto; }
@@ -82,13 +172,155 @@ select.btn { padding: 7px 8px; }
 }
 .no-trains[hidden] { display: none; }
 
+/* The lines panel: one row per line, and a nested list of its stations. Native
+   <details> and real checkboxes throughout, for the reason ModeSwitch and
+   TimeBar both give in their headers. */
+.lines {
+  width: min(300px, 100%); max-height: 46vh; overflow: auto;
+  border-radius: 8px; background: rgba(17, 17, 17, 0.85); backdrop-filter: blur(4px);
+}
+.lines > summary {
+  padding: 9px 12px; font-weight: 600; cursor: pointer;
+  list-style: none; user-select: none;
+}
+.lines > summary::-webkit-details-marker { display: none; }
+.lines .dim { color: #aaa; font-size: 12px; font-weight: 400; }
+.line-list { list-style: none; margin: 0; padding: 0 8px 8px; }
+.line-list label {
+  /* `auto` for the pill, not a fixed width: the track then sizes to the widest
+     pill across every row, so they still line up and one can never overlap the
+     name. A fixed track is what put `AGL` on top of `LRT Ampang`. */
+  display: grid; grid-template-columns: 16px auto 1fr auto;
+  align-items: center; gap: 8px;
+  padding: 4px 6px; border-radius: 6px; cursor: pointer;
+}
+.line-list label:hover { background: #2b2b2b; }
+.line-list input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+/* A hidden line stays readable, just plainly off. */
+.line-list input:not(:checked) ~ * { opacity: 0.45; }
+/* `1fr` is still `min-width: auto` inside a grid, so the name column will not
+   shrink below the longest line name without this. */
+.line-name { min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.n { font-size: 12px; color: #aaa; font-variant-numeric: tabular-nums; }
+.pill {
+  display: inline-block; min-width: 46px; padding: 3px 5px; border-radius: 4px;
+  text-align: center; font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+}
+/* The keyboard route onto the map: a canvas cannot be tabbed through, so the
+   stations are real buttons in a list that has to exist anyway. */
+.stops { margin: 0 0 4px 30px; }
+.stops > summary { padding: 2px 0; color: #aaa; font-size: 12px; cursor: pointer; }
+.stops ul { list-style: none; margin: 0; padding: 2px 0; }
+.stop {
+  display: block; width: 100%; padding: 4px 6px; text-align: left;
+  border: 0; border-radius: 4px; background: transparent; color: #eee;
+  font: inherit; font-size: 13px; cursor: pointer;
+  /* "Bandar Tun Hussein Onn" in a 300 px column, and a button will not wrap by
+     itself. `anywhere` rather than `break-word` because only `anywhere` lets
+     the panel measure itself narrower than its longest word. */
+  overflow-wrap: anywhere;
+}
+.stop:hover { background: #2b2b2b; }
+.stop:disabled { color: #777; cursor: default; }
+.stop:focus-visible, .lines summary:focus-visible, .line-list input:focus-visible {
+  outline: 2px solid #8ab4ff; outline-offset: 2px;
+}
+
+/* The card. In the column at phone width; lifted out to the right below the
+   mode switch on a wide screen — see the media query at the bottom. */
+.card {
+  position: relative; width: 100%; max-height: 40vh; overflow: auto;
+  padding: 12px 14px; border-radius: 8px;
+  background: rgba(17, 17, 17, 0.88); backdrop-filter: blur(4px);
+}
+.card h2 { margin: 6px 0 0; font-size: 18px; line-height: 1.15; }
+.card .sub { margin: 2px 0 0; color: #aaa; font-size: 12px; }
+/* Station names are long and the card is narrow on a phone. See `.stop`. */
+.card h2, .card .sub, .card td { overflow-wrap: anywhere; }
+.card .status { margin: 9px 0 0; font-weight: 600; }
+.card table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 13px; }
+.card th { padding: 9px 0 3px; text-align: left; color: #aaa; font-size: 12px; font-weight: 600; }
+.card td { padding: 4px 0; border-top: 1px solid #333; }
+.card td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.card .sched { margin: 9px 0 0; color: #aaa; font-size: 11px; }
+.card .btn { margin-top: 8px; }
+/* The frame loop hides the rows it has nothing for, and the follow button when
+   there is no running train to follow. `display` has to be said for a table row. */
+.card [hidden] { display: none; }
+.x {
+  position: absolute; right: 6px; top: 6px; width: 28px; height: 28px;
+  border: 0; border-radius: 6px; background: transparent; color: #aaa;
+  font-size: 17px; line-height: 1; cursor: pointer;
+}
+.x:hover { background: #2b2b2b; color: #eee; }
+.x:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+
+/* The camera is still following a train, and its card is shut. Deliberately one
+   short row: the point of shutting the card was to see the train. */
+.following {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 10px; border-radius: 8px;
+  background: rgba(17, 17, 17, 0.85); backdrop-filter: blur(4px);
+  font-size: 13px;
+}
+.following .eye {
+  flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #8ab4ff;
+}
+/* The name gives way before the buttons do: losing the end of a line name is a
+   great deal better than losing the way to stop. */
+.following .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.following .btn { flex: 0 0 auto; padding: 5px 9px; }
+
+/* One click found more than one thing. Trains keep left, so both directions run
+   a few pixels apart by design, and four tracks share the corridor; a wider hit
+   radius on its own would only pick the topmost more often. */
+.chooser {
+  width: min(300px, 100%); max-height: 40vh; overflow: auto;
+  padding: 8px; border-radius: 8px;
+  background: rgba(17, 17, 17, 0.88); backdrop-filter: blur(4px);
+}
+.chooser p { margin: 0 0 4px; padding: 0 6px; color: #aaa; font-size: 12px; }
+.chooser ul { list-style: none; margin: 0; padding: 0; }
+
+/* The hover description. It follows the pointer, so it is written straight to
+   the DOM — never through React state. */
+.tip {
+  position: absolute; z-index: 1; pointer-events: none;
+  transform: translate(12px, -50%);
+  padding: 4px 8px; border-radius: 6px;
+  background: rgba(17, 17, 17, 0.92); font-size: 12px; white-space: nowrap;
+}
+.tip[hidden] { display: none; }
+
+/* Wide enough for two columns: the card leaves the bottom-left column and parks
+   under the mode switch, which is itself under MapLibre's navigation control. */
+@media (min-width: 761px) {
+  .card {
+    position: fixed; right: 10px; top: 160px; z-index: 1;
+    width: 320px; max-height: calc(100vh - 210px);
+  }
+}
+
 /* Long and short wordings, chosen by the stylesheet. The alternative is reading
    innerWidth, which would happen inside the frame loop. */
 .show-s { display: none; }
 @media (max-width: 760px) {
   .hide-s { display: none; }
   .show-s { display: inline; }
-  .timebar { bottom: 30px; gap: 8px 10px; padding: 8px 10px; }
+  .bottom-left { bottom: 30px; gap: 8px; }
+  .timebar { --bar-pad-y: 8px; --bar-pad-x: 10px; gap: 8px 10px; }
   .timebar time { font-size: 19px; }
   .timebar .ticks { display: none; }
+  .lines { width: 100%; max-height: 30vh; }
+  .card { max-height: 34vh; }
+  .chooser { max-height: 30vh; }
+  .caption { max-width: calc(100vw - 20px); }
+}
+
+/* A small phone held upright. The clock keeps its own line rather than
+   squeezing the slider into nothing beside it. */
+@media (max-width: 380px) {
+  .timebar time { font-size: 17px; }
+  .timebar .clock { flex: 1 1 100%; }
+  .timebar .scrub { flex: 1 1 100%; }
 }

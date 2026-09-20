@@ -22,6 +22,12 @@ type Rgb = [number, number, number]
  * still hidden behind tall buildings. Both are the price of composing with the
  * 3D buildings instead of painting over them. See design.md, "Height: an
  * assumption, declared as one".
+ *
+ * It is also load-bearing for picking, which is worth knowing before anybody
+ * "flattens" it: a station marker sits at a fraction of a metre, so a train
+ * standing at a platform is in front of the marker in the picking depth buffer
+ * and wins the pick. Put them at the same height and picks flicker between the
+ * train and the platform it is at.
  */
 export const VIADUCT_M = 10
 
@@ -110,8 +116,18 @@ export function lineColors(rail: PreparedNetwork): Map<string, Rgb> {
   return new Map(rail.lines.map((line) => [line.id, hexToRgb(line.color)]))
 }
 
-/** One train, as the three accessors a `ScenegraphLayer` instance needs. */
+/**
+ * One train, as the accessors a `ScenegraphLayer` instance needs, plus enough
+ * to say which train was picked.
+ *
+ * An id and a line id, and not the `ActiveTrain` itself: that record holds
+ * references to the line and the direction, and handing them to the renderer
+ * would keep a frame's worth of them alive for no reason. The id is looked up
+ * against the frame's own list of trains instead.
+ */
 export interface TrainInstance {
+  id: string
+  lineId: string
   position: [lon: number, lat: number, z: number]
   /** deck.gl's [pitch, yaw, roll], in degrees. */
   orientation: [number, number, number]
@@ -165,6 +181,8 @@ export function trainInstances(
       continue
     }
     list.push({
+      id: train.id,
+      lineId: train.line.id,
       position: [lon, lat, VIADUCT_M],
       orientation: [0, yawFor(p.bearingDeg), 0],
       color: colors.get(train.line.id) ?? FALLBACK,
@@ -202,6 +220,7 @@ export function trainLayers(byMode: Record<Mode, TrainInstance[]>, W: number, be
         id: `trains-${mode}`,
         data: byMode[mode],
         beforeId,
+        pickable: true,
         scenegraph: MODEL_URL[mode],
         // Flat, and said out loud rather than left to the default: it is the
         // path on which `getColor` multiplies the model's texture instead of
