@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Map, NavigationControl } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
-import { activeTrains, klNow, network, prepare, setTimeOfDay } from '../sim'
-import type { DayType } from '../sim'
+import { activeTrains, klNow, network, prepare } from '../sim'
 import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
@@ -17,6 +16,8 @@ import {
 import { FOOTPRINT_LAYER, layerOps, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
 import { ModeSwitch } from '../ui/ModeSwitch'
+import { paintReadout } from '../ui/readout'
+import { setMs, useClock } from '../ui/store'
 
 // The OpenFreeMap "liberty" style already ships a `building-3d` fill-extrusion
 // layer (minzoom 14), so there is nothing for us to add — just zoom in past 14.
@@ -58,20 +59,6 @@ const COLORS = lineColors(rail)
 const CORRIDORS = sharedCorridors(rail)
 
 /**
- * TEMPORARY, and only so this milestone can be looked at: `?t=08:30` starts the
- * simulated clock at that time in Kuala Lumpur, because at a real KL 03:00 there
- * is nothing running and an empty map proves nothing.
- *
- * Milestone 5 replaces it with real time controls. To remove it before then,
- * delete this constant and the `??` that uses it in the clock below. It is
- * deliberately not UI.
- */
-const FORCED_START = (() => {
-  const m = /^(\d\d):(\d\d)$/.exec(new URLSearchParams(location.search).get('t') ?? '')
-  return m ? setTimeOfDay(Date.now(), Number(m[1]) * 3600 + Number(m[2]) * 60) : null
-})()
-
-/**
  * The layers that never change, and what the frame loop needs to keep the
  * station markers up to date.
  *
@@ -106,13 +93,6 @@ export function MapView() {
   const map = useRef<Map | null>(null)
   const statics = useRef<Statics | null>(null)
   const frame = useRef(0)
-  /**
-   * Simulated time. A ref in `src/map` and not a module in `src/sim`, because
-   * `src/sim/purity.test.ts` fails the build on mutable state or `Date.now()`
-   * there. For now it simply runs at real speed; Milestone 5 adds pause, speed
-   * and a day-type override, which is what `override` is already here for.
-   */
-  const clock = useRef({ ms: FORCED_START ?? Date.now(), override: 'auto' as DayType | 'auto' })
   // The style's own layers, captured before deck.gl adds anything of its own.
   // Two reasons, both load-bearing: switching modes must never touch the
   // network's layers, and each entry still carries the paint liberty shipped,
@@ -198,10 +178,16 @@ export function MapView() {
       setStyleLoaded(true)
     })
 
-    // The frame loop. It starts now and does nothing until the overlay exists —
-    // which is also what happens for good when there is no WebGL2, or when the
-    // style had no label layer to anchor the overlay to.
+    // The frame loop. The clock and the readout run from the first frame; the
+    // drawing below waits for the overlay, which never arrives when there is no
+    // WebGL2 or when the style had no label layer to anchor it to.
     let last = performance.now()
+    // The readout is painted a few times a second, not sixty. The prototype
+    // gates on the SIMULATED second, which at 60× changes about sixty times a
+    // real second, so real time gates it as well.
+    let lastSecond = -1
+    let lastPaint = 0
+    let lastAny = true
     const tick = (now: number) => {
       // Re-armed first, so a throw below costs one frame rather than the whole
       // animation.
@@ -209,17 +195,42 @@ export function MapView() {
 
       // Clamped: a tab that has been in the background for thirty seconds comes
       // back with a thirty-second delta, and advancing the timetable by that in
-      // one step teleports every train.
+      // one step teleports every train. At 60× a clamped frame is still fifteen
+      // simulated seconds, so a backgrounded tab at 60× falls behind — which is
+      // the better half of the trade, and deliberate.
       const dt = Math.min(250, now - last)
       last = now
-      clock.current.ms += dt
+
+      // `getState()`, not a hook: this loop is created once, on mount, so any
+      // React state it closed over would be frozen at mount and pressing 60×
+      // would never reach it. No subscription, no dependency, no mirrored ref.
+      const c = useClock.getState()
+      const ms =
+        c.mode === 'live' ? Date.now() : c.mode === 'running' ? c.ms + dt * c.speed : c.ms
+      setMs(ms)
+
+      const t = klNow(ms, c.override)
+      const trains = activeTrains(rail, t.sec, t.today, t.yesterday)
+      const any = trains.length > 0
+      // The one thing the loop publishes to React, and it is written only when
+      // the answer changes — see the guard inside the action.
+      c.setTrainsRunning(any)
+
+      // Clock, date, timetable line and slider go straight to the DOM. Also
+      // painted out of turn the moment service starts or stops, because that is
+      // when React unhides the notice and an empty panel is what a broken one
+      // looks like.
+      const whole = Math.floor(t.sec)
+      if (any !== lastAny || (whole !== lastSecond && now - lastPaint >= 200)) {
+        lastAny = any
+        lastSecond = whole
+        lastPaint = now
+        paintReadout(rail, t, any)
+      }
 
       const deck = overlay.current
       const s = statics.current
       if (!deck || !s) return
-
-      const t = klNow(clock.current.ms, clock.current.override)
-      const trains = activeTrains(rail, t.sec, t.today, t.yesterday)
       // A train's size follows the camera, so both are read fresh each frame.
       const zoom = m.getZoom()
       const lat = m.getCenter().lat
