@@ -1,0 +1,75 @@
+# Rebuild data/network.json from the published GTFS feed, once a day.
+#
+# This job has write access to the default branch and nobody is watching it, so:
+# it downloads only from the official API, it commits only data/network.json,
+# it commits only when the checks pass, and it commits only when the data has
+# actually changed. If anything fails it stops without committing, the run goes
+# red, and GitHub emails the owner - the site keeps drawing the timetable it
+# already has, which is still honestly a schedule.
+name: Refresh timetable
+
+on:
+  schedule:
+    # 20:00 UTC is 04:00 in Kuala Lumpur, after the last train and before the
+    # first one, so the data never changes under a viewer mid-service.
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The minimum that lets it commit. No packages, no issues, no pull requests.
+    permissions:
+      contents: write
+
+    steps:
+      # Pinned to a commit, with the version alongside, so a tag being moved
+      # cannot change what runs here unattended.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Install the data script's dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Download the published GTFS feed
+        run: |
+          curl --fail --show-error --silent --location \
+               --retry 2 --retry-delay 5 --max-time 180 \
+               -o "$RUNNER_TEMP/feed.zip" \
+               'https://api.data.gov.my/gtfs-static/prasarana?category=rapid-rail-kl'
+          unzip -q -o "$RUNNER_TEMP/feed.zip" -d "$RUNNER_TEMP/feed"
+
+      - name: Rebuild the network
+        # Into a temporary file, so a failure below leaves the committed data alone.
+        run: python scripts/build_network_json.py "$RUNNER_TEMP/feed" "$RUNNER_TEMP/rebuilt.json"
+
+      - name: Check the rebuilt data
+        # Rules any correct timetable satisfies, compared against the file it
+        # would replace. Deliberately NOT `npm test`: those tests are pinned to
+        # the stored snapshot and a legitimate timetable change is meant to turn
+        # them red, for a person to look at.
+        #
+        # --self-test breaks the data on purpose afterwards and fails if any
+        # check sleeps through it, so every run's log shows the checks can still
+        # fail. A check nobody has seen fail is not a check.
+        run: python scripts/check_feed.py "$RUNNER_TEMP/rebuilt.json" --against data/network.json --self-test
+
+      - name: Commit, but only if the timetable actually changed
+        run: |
+          mv "$RUNNER_TEMP/rebuilt.json" data/network.json
+          if git diff --quiet -- data/network.json; then
+            echo 'The published timetable has not changed. Nothing to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/network.json
+          git commit \
+            -m 'chore: refresh the timetable from the published feed' \
+            -m 'Rebuilt by .github/workflows/refresh-timetable.yml from the official API, api.data.gov.my/gtfs-static/prasarana?category=rapid-rail-kl. The feed checks passed.' \
+            -m 'The tests pinned to the previous snapshot may now fail. That means the timetable changed: look at what moved and update them. Do not loosen them so that a refresh can pass.'
+          git push

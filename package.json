@@ -3,11 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "//": "Two kinds of check: `test` asserts values measured from the shipped timetable, so a real timetable change is meant to turn it red; `check:feed` asserts only rules any correct timetable satisfies, which is what the daily refresh runs.",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "models": "node scripts/build_train_models.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:feed": "python scripts/check_feed.py data/network.json --self-test"
+  },
+  "engines": {
+    "node": ">=22.12"
   },
   "dependencies": {
     "@deck.gl/core": "^9.4.0",
