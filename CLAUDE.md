@@ -320,5 +320,22 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   stays still. Carried into #43, which also replaces the arrows with 3D models and moves buses
   between fixes - the owner relaxed "never extrapolate" for buses only, with the card saying the
   position is estimated.
-- Next: #43 (bus view), #25 and #26 (labels and filtering, the journey planner), and #35, where
-  rotating while following still does not work on touch.
+- Station labels (issue #25): one name per PLACE, a deck.gl `TextLayer` in the overlay, not DOM.
+  Choosing which names show (priority, then no overlap, at most 40) runs at most every 200 ms and
+  only when something changed; placing them is the renderer's job. A name sits at the mean of its
+  place's DRAWN rings, so on the shared corridor it is centred between them and moves onto the
+  remaining ring when a line is hidden. `Place.lon/lat` is never used for drawing.
+- Names are drawn OVER the lines and the trains, last in `setProps`, depth ignored — the owner's
+  call on sight, reversing the plan's "beneath the trains": a name you cannot read is no use. They
+  are NOT pickable, so a train under a name still answers. Lifted `stationRadius + 10` px above the
+  ring; 4 px let lines run through the text.
+- Ours are the only STATION names. OpenFreeMap's rail stations are `class: "railway"` in the `poi`
+  source-layer, printed by `poi_r1`/`poi_r7`/`poi_r20` from zoom 15 — NOT `poi_transit`, which in
+  KL is bus stops (kept, deliberately). They are filtered out once at load with `setFilter`; the
+  mode switch writes only paint and visibility, never filters, and a test holds it to that. The
+  base map's other labels (place names, bus stops) still draw over ours in the city view.
+- `src/rail.ts` prepares the network and derives places ONCE for the map and the panel. The
+  station search is in the lines panel; matching ignores case, spaces, hyphens, apostrophes and
+  accents, and choosing a result reuses `goToStation`.
+- Next: #43 (bus view), #26 (the journey planner), and #35, where rotating while following still
+  does not work on touch.

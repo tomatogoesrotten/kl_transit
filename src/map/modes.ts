@@ -42,6 +42,7 @@ export interface StyleLayer {
   // expression too, and we only ever ask whether it is the literal 'none'.
   layout?: { visibility?: unknown }
   paint?: Record<string, unknown>
+  filter?: unknown
 }
 
 export interface LayerOp {
@@ -101,6 +102,31 @@ function wireframeRule(layer: StyleLayer): Record<string, unknown> | 'hide' | nu
     default:
       return null
   }
+}
+
+/**
+ * The filters that take OpenStreetMap's own rail-station names off the base map,
+ * so the network's labels are the only station names. One per POI symbol layer.
+ *
+ * In OpenFreeMap's tiles a station is a POI of class `railway` (subclass
+ * `station` or `subway`), and liberty prints it through its rank-banded layers
+ * (`poi_r1`, `poi_r7`, `poi_r20`) from zoom 15. NOT through `poi_transit`, whose
+ * class list (`airport`, `bus`, `rail`) never matches `railway`: in Kuala Lumpur
+ * that layer is bus stops, and those stay, because buses are coming to this map.
+ *
+ * Keyed on `source-layer`, never on id, for the reason `wireframeRule` gives.
+ * Adding the exclusion to `poi_transit` too changes nothing it draws.
+ *
+ * Applied once, at load. Neither mode ever writes a filter, so switching modes
+ * cannot bring the names back.
+ */
+export function stationNameFilters(
+  layers: readonly StyleLayer[],
+): { id: string; filter: unknown }[] {
+  const notRailway = ['!=', ['get', 'class'], 'railway']
+  return layers
+    .filter((l) => l.type === 'symbol' && l['source-layer'] === 'poi')
+    .map((l) => ({ id: l.id, filter: l.filter ? ['all', l.filter, notRailway] : notRailway }))
 }
 
 /**

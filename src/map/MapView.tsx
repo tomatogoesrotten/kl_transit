@@ -18,10 +18,22 @@ import { AttributionControl, Map, NavigationControl, setWorkerUrl } from 'maplib
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import type { PaddingOptions } from 'maplibre-gl'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
-import { activeTrains, klNow, network, prepare } from '../sim'
+import { activeTrains, klNow } from '../sim'
 import type { ActiveTrain, KlTime } from '../sim'
 import { arrivalZoom, panelPadding } from './camera'
 import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
+import {
+  chooseLabels,
+  LABEL_FONT,
+  LABEL_PX,
+  LABEL_WEIGHT,
+  labelAnchors,
+  labelLayer,
+  labelLift,
+  labelPriority,
+  SELECTED_PX,
+} from './labels'
+import type { LabelCandidate, LabelDatum } from './labels'
 import type { StationDot } from './layers'
 import { sharedCorridors } from './offset'
 import {
@@ -33,7 +45,7 @@ import {
   trainLayers,
 } from './trains'
 import type { TrainInstance } from './trains'
-import { FOOTPRINT_LAYER, layerOps, WIREFRAME } from './modes'
+import { FOOTPRINT_LAYER, layerOps, stationNameFilters, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
 import { liveLayers } from './live'
 import type { LiveItem } from './live'
@@ -45,6 +57,7 @@ import { distinctSelections, findTrain, trainSelection, vehicleHover } from '../
 import { paintCard, paintCounts, paintLive, paintReadout, panels, showTip } from '../ui/readout'
 import type { Selection } from '../ui/store'
 import { setMs, useClock, useLive, useView } from '../ui/store'
+import { PLACES, rail } from '../rail'
 
 // The OpenFreeMap "liberty" style already ships a `building-3d` fill-extrusion
 // layer (minzoom 14), so there is nothing for us to add — just zoom in past 14.
@@ -113,12 +126,40 @@ const PICK_RADIUS = COARSE_POINTER ? 18 : 12
  */
 const PICK_DEPTH = 8
 
-const rail = prepare(network)
 // Parsed once, not once per train per frame.
 const COLORS = lineColors(rail)
 // Ampang and Sri Petaling share their last 8.5 km, so they cannot both be drawn
 // on it. Found in the data rather than listed here: see `sharedCorridors`.
 const CORRIDORS = sharedCorridors(rail)
+
+/** Each place's label priority with nothing selected. Selection only ever raises one to 0. */
+const BASE_PRIORITY = new globalThis.Map(PLACES.map((p) => [p.id, labelPriority(p, rail)]))
+/** Stop id to the place it belongs to, for finding the selected station's place. */
+const PLACE_OF = new globalThis.Map(PLACES.flatMap((p) => p.stops.map((id) => [id, p.id] as const)))
+
+/**
+ * How often, at most, the choice of names is recomputed. Placing them is the
+ * renderer's job every frame; choosing them five times a second is what stops
+ * the set of names churning while the camera moves.
+ */
+const CHOOSE_MS = 200
+
+/**
+ * Each place's label width in pixels, measured once in the label font.
+ *
+ * Measured, not guessed from the length: names run from 3 to 27 characters and
+ * a per-character estimate is wrong at both ends. `system-ui` is a system font
+ * and needs no loading; a web font would have to wait for `document.fonts.ready`.
+ */
+function measureNames() {
+  const ctx = document.createElement('canvas').getContext('2d')
+  // `globalThis`: MapLibre's `Map` is imported above and shadows the built-in.
+  const widths = new globalThis.Map<string, number>()
+  if (!ctx) return widths
+  ctx.font = `${LABEL_WEIGHT} ${LABEL_PX}px ${LABEL_FONT}`
+  for (const p of PLACES) widths.set(p.id, ctx.measureText(p.name).width)
+  return widths
+}
 
 /**
  * The layers that never change, and what the frame loop needs to keep the
@@ -145,6 +186,11 @@ interface Statics {
   index: ReturnType<typeof stationIndex>
   stations: ReturnType<typeof stationLayer>
   busyVersion: number
+  /** Where each place's name sits, from the rings in `dots`. Replaced whenever they are. */
+  anchors: ReturnType<typeof labelAnchors>
+  labels: ReturnType<typeof labelLayer>
+  /** What `labels` was built from: mode, selected place and chosen ids. Compared as a string. */
+  labelKey: string
   /** The hidden set the layers above were built from. Compared by identity. */
   hidden: ReadonlySet<string>
   /** The live bus and KTM layers, rebuilt inside only when something visible changed. */
@@ -243,6 +289,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   // The mode for the frame loop, which is created once on mount and would
   // otherwise see only the mode it started with. Kept in step by the mode effect.
   const modeRef = useRef(mode)
+  // Set by anything that can change which names should show; cleared by the
+  // choose pass in the frame loop. A ref because the mode effect sets it too.
+  const labelsDirty = useRef(true)
   // What the frame loop last computed, for the pick handlers to read. They fire
   // between frames, so they cannot recompute any of it themselves without
   // disagreeing with what is on the screen.
@@ -341,6 +390,13 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // back.
     m.on('dragstart', () => useView.getState().stopFollowing())
 
+    // Every camera change, the viewer's or ours, may give a name room or take it
+    // away. The last `move` of a gesture leaves the flag set, so one final
+    // choose pass always runs once the camera settles.
+    m.on('move', () => {
+      labelsDirty.current = true
+    })
+
     // Rotating and tilting are NOT taking the map back, so they must not stop
     // following — and MapLibre fires `rotatestart`/`pitchstart` for those, never
     // `dragstart`, so nothing above cancels them.
@@ -393,6 +449,15 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       // network it exists to show.
       styleLayers.current = m.getStyle().layers
       const beforeId = labelLayerId(styleLayers.current)
+
+      // OpenStreetMap's own station names off, so ours are the only ones: two
+      // spellings of one station, a few pixels apart, is noise. Once, here; no
+      // mode writes a filter, so switching modes never brings them back. See
+      // `stationNameFilters` for why this is not `poi_transit`.
+      // A cast for the same reason as `setPaint` below: the filter is built
+      // from the style's own, which MapLibre cannot check against its type.
+      const setFilter = m.setFilter.bind(m) as (id: string, filter: unknown) => void
+      for (const { id, filter } of stationNameFilters(styleLayers.current)) setFilter(id, filter)
 
       // The one layer this app contributes to the base map, and it exists only
       // because MapLibre's fill-extrusion has no outline property: extruded
@@ -485,14 +550,18 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
           // rebuild every layer on the very first frame for nothing.
           const hidden = useView.getState().hidden
           const { dots } = camera(m.getZoom(), m.getCenter().lat, hidden)
+          const index = stationIndex(dots)
           statics.current = {
             beforeId,
             lines: lineLayer(rail, CORRIDORS, beforeId, hidden),
             camera,
             dots,
-            index: stationIndex(dots),
+            index,
             stations: stationLayer(dots, beforeId, 0, m.getZoom()),
             busyVersion: 0,
+            anchors: labelAnchors(PLACES, dots, index),
+            labels: labelLayer([], modeRef.current, m.getZoom(), beforeId),
+            labelKey: '',
             hidden,
             live: liveLayers(beforeId),
           }
@@ -526,6 +595,11 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // as the loop so the development double-mount stops the first one; the
     // request times live in the module, so the remount cannot fetch early.
     const stopPolling = startPolling()
+    // The label choice: when it last ran, what it chose, and what it was for.
+    let lastChoose = -Infinity
+    let chosen: string[] = []
+    let lastSelectedPlace: string | undefined
+    let widths: ReturnType<typeof measureNames> | null = null
     const tick = (now: number) => {
       // Re-armed first, so a throw below costs one frame rather than the whole
       // animation.
@@ -640,6 +714,12 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         s.dots = cam.dots
         s.index = stationIndex(cam.dots)
         changed = true
+        // The names sit with the rings, so they move when the rings do: on this
+        // frame, not on the next choose pass, or a corridor name trails its
+        // rings through a zoom.
+        s.anchors = labelAnchors(PLACES, s.dots, s.index)
+        s.labelKey = ''
+        labelsDirty.current = true
       }
 
       // Stations fill while a train stands at them. `dots` is one array mutated
@@ -656,6 +736,53 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       if (changed) {
         s.busyVersion += 1
         s.stations = stationLayer(s.dots, s.beforeId, s.busyVersion, m.getZoom())
+      }
+
+      // Station names: which to show is chosen at most every CHOOSE_MS, and
+      // only when something that affects it changed. Where they are drawn is
+      // deck.gl's job, every frame, in the same projection as everything else.
+      const selectedPlace =
+        view.selection?.kind === 'station' ? PLACE_OF.get(view.selection.stopId) : undefined
+      if (selectedPlace !== lastSelectedPlace) {
+        lastSelectedPlace = selectedPlace
+        labelsDirty.current = true
+      }
+      if (labelsDirty.current && now - lastChoose >= CHOOSE_MS) {
+        labelsDirty.current = false
+        lastChoose = now
+        widths ??= measureNames()
+        const lift = labelLift(zoom)
+        const candidates: LabelCandidate[] = []
+        for (const [id, [lon, lat]] of s.anchors) {
+          const p = m.project([lon, lat])
+          const selected = id === selectedPlace
+          const scale = selected ? SELECTED_PX / LABEL_PX : 1
+          candidates.push({
+            id,
+            x: p.x,
+            y: p.y - lift,
+            width: (widths.get(id) ?? 0) * scale,
+            height: selected ? SELECTED_PX : LABEL_PX,
+            priority: selected ? 0 : (BASE_PRIORITY.get(id) ?? 2),
+          })
+        }
+        const box = m.getContainer()
+        chosen = chooseLabels(candidates, {
+          zoom,
+          width: box.clientWidth,
+          height: box.clientHeight,
+        })
+      }
+      // The same instance back unless what it shows changed: the chosen names,
+      // the selected one, the mode, or the anchors (which clear the key above).
+      const labelKey = `${modeRef.current}#${selectedPlace ?? ''}#${chosen.join('|')}`
+      if (labelKey !== s.labelKey) {
+        s.labelKey = labelKey
+        const data: LabelDatum[] = chosen.flatMap((id) => {
+          const position = s.anchors.get(id)
+          return position ? [{ id, position, selected: id === selectedPlace }] : []
+        })
+        s.labels = labelLayer(data, modeRef.current, zoom, s.beforeId)
       }
 
       // `cam.gap` rather than the gap for this frame's camera, so a train is
@@ -692,8 +819,10 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       // Straight to deck.gl, never through React state. The two static layers go
       // back as the same instances; only the trains are new.
       //
-      // Order is draw order: the trains go last, so a train standing at a
-      // platform is drawn over its own station marker rather than under it.
+      // Order is draw order: a train standing at a platform is drawn over its
+      // own station marker rather than under it, and the names go last of all,
+      // over the lines and the trains (the owner's call: a name you cannot read
+      // is no use). Names are not pickable, so a train under one still answers.
       // Live vehicles go FIRST, so every line, station and train is drawn over
       // the buses where they cross - a hundred buses must not bury the network.
       // Left out entirely while the clock is not live: every mode is passed as
@@ -706,6 +835,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
           cam.shared,
           s.stations,
           ...trainLayers(byMode, W, s.beforeId),
+          s.labels,
         ],
       })
     }
@@ -744,8 +874,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // to know. A third view later would be CSS alone.
     document.documentElement.dataset.mapMode = mode
     // Before the early return: the frame loop reads it whether or not the style
-    // has loaded, and the live markers' colour changes with it.
+    // has loaded; the labels' ink and halo and the live markers' colour change with it.
     modeRef.current = mode
+    labelsDirty.current = true
 
     const m = map.current
     if (!m || !styleLoaded) return
