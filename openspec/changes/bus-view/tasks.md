@@ -140,18 +140,18 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 10. Stage 4: the pure core
 
-- [ ] 10.1 Narrow `pointAt`'s first parameter to the fields it reads. Verify the golden tests pass
+- [x] 10.1 Narrow `pointAt`'s first parameter to the fields it reads. Verify the golden tests pass
       unchanged.
-- [ ] 10.2 Write `src/live/estimate.ts` with `onFix` and `drawnAt` and the constants in design.md's
+- [x] 10.2 Write `src/live/estimate.ts` with `onFix` and `drawnAt` and the constants in design.md's
       table (`SPEED_FACTOR` 0.5), and add it to `purity.test.ts`'s glob. Verify the purity test scans
       it.
-- [ ] 10.3 Test every rule in the bus-estimation spec with fixed inputs: advancing at `SPEED_FACTOR` of
+- [x] 10.3 Test every rule in the bus-estimation spec with fixed inputs: advancing at `SPEED_FACTOR` of
       the measured speed; the 150 s stop; the end of the shape; catch-up forward over 4 s; hold for up
       to 250 m then continue; hold ending in a jump when the new estimate stops short; jump beyond
       250 m; a new trip; unknown trip, over 50 m off, one fix only, over 90 km/h; a loop shape settled
       by bearing, and one left unsettled; the same inputs giving the same result. Include one case
       built from a real bus in `src/live/fixtures/`. Verify `npm test`.
-- [ ] 10.4 Add a replay test: copy the responses in this change's `samples/` to `src/live/fixtures/`,
+- [x] 10.4 Add a replay test: copy the responses in this change's `samples/` to `src/live/fixtures/`,
       replay them with the two existing bus fixtures through `onFix` and `drawnAt` at 60 frames a
       second against `data/bus-shapes.json`, and assert no drawn position ever moves backwards along
       its shape between frames. Verify `npm test`.

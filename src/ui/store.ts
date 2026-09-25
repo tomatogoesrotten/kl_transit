@@ -3,7 +3,7 @@ import { setTimeOfDay } from '../sim'
 import type { DayType } from '../sim'
 import { dropGone, mergeFixes, NO_REJECTS } from '../live/feed'
 import type { Decoded, LiveMode, LiveVehicle, Rejected } from '../live/feed'
-import type { BusStop } from '../live/busdata'
+import type { BusShapes, BusStop } from '../live/busdata'
 
 /**
  * How the clock is behaving.
@@ -376,6 +376,12 @@ export type LoadState = 'idle' | 'loading' | 'ready' | 'failed'
 export interface LiveStore extends LiveFeeds {
   /** The bus stops, fetched the first time the bus view is shown. See `loadStops`. */
   stops: { state: LoadState; data: readonly BusStop[] | null }
+  /**
+   * The route shapes estimation moves buses along, fetched in the background
+   * after the map has first drawn, while buses are on. See `loadShapes`. Until
+   * they are ready no bus is estimated, or described as estimated.
+   */
+  shapes: { state: LoadState; data: BusShapes | null }
 }
 
 const WAITING: LiveFeed = {
@@ -396,6 +402,7 @@ export const useLive = create<LiveStore>()(() => ({
   bus: WAITING,
   ktm: WAITING,
   stops: { state: 'idle', data: null },
+  shapes: { state: 'idle', data: null },
 }))
 
 /**
