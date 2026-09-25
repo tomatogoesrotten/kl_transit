@@ -192,7 +192,7 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       says estimated, gives the fix age and counts down, and its route is drawn; the hover says
       estimated; a stale bus is faded; ETS pucks stay where the feed puts them. Tune `SPEED_FACTOR` by
       eye here (fewer pauses against more lag). Not done until somebody has seen it.
-- [ ] 12.3 Update `CLAUDE.md`: the honesty rule's text (bus positions are estimated between live
+- [x] 12.3 Update `CLAUDE.md`: the honesty rule's text (bus positions are estimated between live
       reports wherever an estimate is drawn, and say so; KTM, and buses without a usable shape, are
       never estimated), the Status section (motion in both views, what loads when and why, the
       estimation constants and the correction rules, polling at 30 s and 120 s), the architecture block
