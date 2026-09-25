@@ -11,9 +11,9 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 1. Stage 1: archive the merged changes
 
-- [ ] 1.1 In `live-buses-ktm/tasks.md`, note that open tasks 5.4 (phone width and keyboard only) and
+- [x] 1.1 In `live-buses-ktm/tasks.md`, note that open tasks 5.4 (phone width and keyboard only) and
       7.1 (re-sample) moved to this change's 7.2 and 12.1. Verify by reading it.
-- [ ] 1.2 Archive, in merge order, `interchange-places` (#42), `live-buses-ktm` (#44) and
+- [x] 1.2 Archive, in merge order, `interchange-places` (#42), `live-buses-ktm` (#44) and
       `station-labels` (#45), from this branch's committed files (the owner's main checkout has
       `station-labels`' spec files deleted but uncommitted; leave that alone and mention it in the pull
       request). Do NOT archive `station-models`. Run `npx openspec validate <change> --strict` on each

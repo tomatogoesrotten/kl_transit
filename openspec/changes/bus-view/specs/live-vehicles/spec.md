@@ -26,7 +26,7 @@ whose bearing is a placeholder SHALL have its vehicles drawn without a direction
 - **WHEN** a bus is moving on an estimate, in either view
 - **THEN** it is drawn at its estimate, and its card and hover say the position is estimated
 
-#### Scenario: A KTM ETS train between two reports
+#### Scenario: Between two reports
 
 - **WHEN** a KTM ETS train has been reported and no newer report has arrived, in either view
 - **THEN** it stays exactly where it was reported
@@ -114,7 +114,7 @@ In the rail view, at a zoom where the whole city is in view, bus markers SHALL r
 obscuring the rail lines, stations or trains, and the rail network SHALL be drawn above the buses where
 they overlap. In the bus view the priority is reversed, as the bus-view capability says.
 
-#### Scenario: The whole city in view, in the rail view
+#### Scenario: The whole city in view
 
 - **WHEN** the rail view is zoomed out to show all of Kuala Lumpur with over a hundred buses reporting
 - **THEN** every rail line and train is still plainly visible among them
@@ -141,7 +141,7 @@ newer report SHALL be reflected, and when the vehicle is no longer drawn the car
 stopped reporting rather than showing its last details as current. The hover text SHALL also stay
 current while the pointer rests still.
 
-#### Scenario: Pointing at a bus at its report
+#### Scenario: Pointing at a bus
 
 - **WHEN** the pointer rests on a bus drawn at its last report
 - **THEN** its mode, its public route name and feed id, and the age of its report are shown
