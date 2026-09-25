@@ -166,14 +166,14 @@ describe('replaying the recorded responses at 60 frames a second', () => {
   // each correction landed, judged when the response ARRIVES (its header time),
   // which is later than design.md's backtest judges it (the fix's own time), so
   // the estimate has run further and more corrections land behind or far
-  // behind: design.md expected about 80% ahead, 16 to 21% holding, 2 to 3%
-  // jumping back. Every jump at landing here is a correction of more than
-  // 250 m. `jumpsBack` counts every backward step over the whole replay, which
+  // behind: design.md expected about 72% ahead, 28% holding, 5 to 6% jumping
+  // back at 0.7. (At 0.5 this replay measured A 77/18/5% and B 70/24/6%.)
+  // Every jump at landing here is a correction of more than 250 m. `jumpsBack` counts every backward step over the whole replay, which
   // adds holds that ended at the 150 s limit and buses that were standing at
   // their place when corrected.
   it.each([
-    ['A', 190, 0.774, 0.179, 0.047, 21],
-    ['B', 279, 0.699, 0.244, 0.057, 32],
+    ['A', 190, 0.653, 0.274, 0.074, 25],
+    ['B', 279, 0.627, 0.272, 0.100, 45],
   ] as const)('lands set %s as measured', (name, landings, ahead, hold, jump, jumpsBack) => {
     const r = replay(SETS[name])
     expect(r.landings).toBe(landings)
@@ -189,14 +189,14 @@ describe('replaying the recorded responses at 60 frames a second', () => {
 })
 
 describe("design.md's backtest, on the app's own placement code", () => {
-  // design.md, "How fast an estimate moves", row 0.5: A 178 m, 16%, 3%, 168 m;
-  // B 154 m, 21%, 3%, 126 m, from 200 and 285 triples. Re-run here on the
+  // design.md, "How fast an estimate moves", row 0.7: A 139 m, 28%, 5%, 102 m;
+  // B 128 m, 28%, 6%, 69 m, from 200 and 285 triples. Re-run here on the
   // placement `onFix` really uses, which keeps 190 and 279 of them.
   it.each([
-    ['A', 190, 178, 0.153, 0.021, 167],
-    ['B', 279, 155, 0.211, 0.029, 127],
-  ] as const)('reproduces set %s at SPEED_FACTOR 0.5', (name, triples, error, behind, far, lag) => {
-    expect(SPEED_FACTOR).toBe(0.5)
+    ['A', 190, 138, 0.274, 0.047, 101],
+    ['B', 279, 129, 0.290, 0.061, 69],
+  ] as const)('reproduces set %s at SPEED_FACTOR 0.7', (name, triples, error, behind, far, lag) => {
+    expect(SPEED_FACTOR).toBe(0.7)
     const b = backtest(SETS[name])
     expect(b.triples).toBe(triples)
     expect(Math.round(b.error)).toBe(error)

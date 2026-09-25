@@ -57,6 +57,7 @@ So prediction roughly halves the jump. But **the real fix lands more than 5 m be
 in 46% of cases**, because buses stop at lights and at stops, and a bus drawn ahead of the truth has to
 wait for it. Moving buses at a fraction of their measured speed trades those pauses for lag: at 0.5 the
 share landing behind falls to 16 to 21%, and the median error is still about half of holding still.
+On sight the owner found 0.5 too laggy and raised it to 0.7: 28% land behind, for about half the lag.
 design.md, "How fast an estimate moves", has the table across factors and both samples.
 
 **Bearing resolves the round-trip shapes.** Where a fix has several candidate places on its shape,

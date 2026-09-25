@@ -187,7 +187,7 @@ In five lines:
    shapes in 83 of 89 and 124 of 132 cases); after the first fix, the candidate just ahead of the last
    place (allowing 60 m back for GPS noise) wins.
 2. Speed is the along-shape distance between the last two fixes on the trip over their time gap,
-   times `SPEED_FACTOR` (0.5); the estimate is `place + speed × min(now − fixSec, 150 s)`, clamped to the shape's end.
+   times `SPEED_FACTOR` (0.7); the estimate is `place + speed × min(now − fixSec, 150 s)`, clamped to the shape's end.
 3. On a new fix, what is drawn catches up forward over 4 s, stands still if the new estimate is up
    to 250 m behind until it passes, and jumps if more than 250 m behind, on a new trip, or when a held
    bus's new estimate stops short of it.
@@ -212,16 +212,18 @@ contract:
 
 | Constant | Value | From |
 |---|---|---|
-| `SPEED_FACTOR` | 0.5 | the owner prefers fewer pauses to less lag; see "How fast an estimate moves" below. Tunable by eye |
+| `SPEED_FACTOR` | 0.7 | picked at 0.5 for fewer pauses, raised to 0.7 by the owner on sight because 0.5 lagged too far; see "How fast an estimate moves" below. Tunable by eye |
 | `PREDICT_S` | 150 | fix-to-fix gap median 60 s, p90 90 s, plus header lag median 27 s and up to 30 s of polling: a normally reporting bus's next fix lands within about 150 s |
 | `OFF_ROUTE_M` | 50 | fix-to-shape distance p95 25 to 38 m |
 | `BEARING_TOL_DEG` | 60 | bearing against shape direction: median 3.3 degrees, p90 19 degrees |
-| `HOLD_MAX_M` | 250 | at 0.5, 2 to 3% of fixes land more than 250 m behind. Standing 250 m at 17 km/h is about 50 s, a long red light |
+| `HOLD_MAX_M` | 250 | at 0.7, 5 to 6% of fixes land more than 250 m behind (2 to 3% at 0.5). Standing 250 m at 17 km/h is about 50 s, a long red light |
 | `CATCH_UP_S` | 4 | taste |
 | `MAX_KMH` | 90 | tracked speeds p99 60 to 66 km/h; the feed's own maximum 81.7 km/h; anything above is a mismatched place |
 
-Expected behaviour at 0.5: about 80% of new fixes land ahead and the bus catches up forward, 16 to
-21% land behind and it pauses, 2 to 3% jump back.
+Expected behaviour at 0.7: about 72% of new fixes land ahead and the bus catches up forward, about
+28% land behind and it pauses, 5 to 6% jump back. Judged when each response arrives (later than the
+backtest judges it), `replay.test.ts` measures 65 / 27 / 7% (A) and 63 / 27 / 10% (B) ahead / holding
+/ jumping back, against 77 / 18 / 5% and 70 / 24 / 6% at 0.5.
 
 ### How fast an estimate moves
 
@@ -246,19 +248,22 @@ between them would make false triples.
 |---|---|---|---|---|---|---|---|---|
 | 1.0 | 131 m | 46% | 15% | 1 m | 113 m | 45% | 14% | 1 m |
 | 0.8 | 149 m | 33% | 7% | 69 m | 124 m | 34% | 9% | 46 m |
-| 0.7 | 139 m | 28% | 5% | 102 m | 128 m | 28% | 6% | 69 m |
+| **0.7** | **139 m** | **28%** | **5%** | **102 m** | **128 m** | **28%** | **6%** | **69 m** |
 | 0.6 | 161 m | 23% | 4% | 133 m | 151 m | 26% | 4% | 96 m |
-| **0.5** | **178 m** | **16%** | **3%** | **168 m** | **154 m** | **21%** | **3%** | **126 m** |
+| 0.5 | 178 m | 16% | 3% | 168 m | 154 m | 21% | 3% | 126 m |
 | 0.4 | 208 m | 13% | 1% | 206 m | 176 m | 14% | 1% | 158 m |
 | hold still (#40) | 343 m | 1% | 0% | 343 m | 275 m | 1% | 0% | 275 m |
 
-**The pick is 0.5.** Across both samples it cuts "lands behind" from about 34% at 0.8 to about 19%,
-which is roughly half, and its median error (178 m and 154 m) is about half of holding still (343 m and
-275 m). The price is lag: when a fix arrives the drawn bus is typically 130 to 170 m behind it, and
-catches up forward over `CATCH_UP_S`. 0.4 halves the pauses more surely (13 to 14%) for another 30 to
-40 m of lag; it is the next step if the owner still sees too many pauses. `SPEED_FACTOR` is taste
-within this table, tuned by eye in task 12.2 and re-measured in 12.1. The "never glide backwards" rule
-does not depend on it.
+**The pick is 0.7, after 0.5 was tried first.** 0.5 was picked from this table: across both samples
+it cuts "lands behind" from about 34% at 0.8 to about 19%, which is roughly half, and its median
+error (178 m and 154 m) is about half of holding still (343 m and 275 m). The price is lag: when a
+fix arrives the drawn bus is typically 130 to 170 m behind it, and catches up forward over
+`CATCH_UP_S`. 0.4 halves the pauses more surely (13 to 14%) for another 30 to 40 m of lag. On sight
+the owner found 0.5 too slow and laggy, and raised it to 0.7: that trades more pauses (28% land
+behind, 5 to 6% jump back) for less lag (102 m and 69 m against 168 m and 126 m), with the lowest
+median error of any factor below one. Making buses stop at stops rather than averaging over them is
+a separate, later change. `SPEED_FACTOR` is taste within this table, tuned by eye in task 12.2 and
+re-measured in 12.1. The "never glide backwards" rule does not depend on it.
 
 Why not snap forward only, or ease backwards: easing back is a bus driving backwards, which the owner
 ruled out; never correcting back would leave buses up to 500 m ahead of the truth. Holding is what a
@@ -336,7 +341,7 @@ test`, never in the checks.
 
 ## Risks / Trade-offs
 
-- [Estimates trail the real bus by a median of 130 to 170 m at 0.5, and 2 to 3% of corrections jump
+- [Estimates trail the real bus by a median of 70 to 100 m at 0.7, and 5 to 6% of corrections jump
   back more than 250 m]
   → Said on every card and hover, the constants are named and tunable, the owner looks during service,
   and the selected bus's route is drawn so the assumption is visible.

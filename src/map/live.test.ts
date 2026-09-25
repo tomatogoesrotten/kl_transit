@@ -339,8 +339,8 @@ describe('liveLayers, buses moving on estimates', () => {
     expect(later).not.toBe(first)
     const item = draw.item('bus', 'A')!
     expect(item.motion).toEqual({ estimated: true, still: null, shapeId: 'S' })
-    // 300 m in 60 s, drawn at half that for 20 s: 50 m on from the report.
-    expect(metres(lonOf(later), 101.7 + 300 / kx)).toBeCloseTo(50, 0)
+    // 300 m in 60 s, drawn at 0.7 of that for 20 s: 70 m on from the report.
+    expect(metres(lonOf(later), 101.7 + 300 / kx)).toBeCloseTo(70, 0)
     expect(item.bearing).toBeCloseTo(90, 6)
   })
 

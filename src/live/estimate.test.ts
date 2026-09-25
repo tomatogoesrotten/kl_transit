@@ -87,12 +87,12 @@ function frames(start: Drawn | undefined, track: Track, fromSec: number, toSec: 
 
 describe('an estimate follows the bus along its route', () => {
   it('advances at SPEED_FACTOR of the speed measured between its last two reports', () => {
-    // The spec's scenario: 300 m in 60 s, reported 20 s ago -> 50 m ahead at 0.5.
-    expect(SPEED_FACTOR).toBe(0.5)
+    // The spec's scenario: 300 m in 60 s, reported 20 s ago -> 70 m ahead at 0.7.
+    expect(SPEED_FACTOR).toBe(0.7)
     const track = moving(1000, 300, 60)
     expect(track.speed).toBeCloseTo(5, 6)
     expect(track.still).toBeNull()
-    expect(estimateAt(track, ms(T0 + 20))).toBeCloseTo(1300 + 50, 6)
+    expect(estimateAt(track, ms(T0 + 20))).toBeCloseTo(1300 + 70, 6)
     // And still moving forward.
     expect(estimateAt(track, ms(T0 + 21))!).toBeGreaterThan(estimateAt(track, ms(T0 + 20))!)
   })
@@ -200,11 +200,11 @@ describe('a shape that passes the same street twice', () => {
 })
 
 describe('a new report corrects the estimate without driving backwards', () => {
-  // A bus measured at 10 m/s (drawn at 5), drawn for the 60 s after its report
+  // A bus measured at 10 m/s (drawn at 7), drawn for the 60 s after its report
   // at 1300 m. Each case's next report is made at T0 + 60 and received at once.
   const before = moving(700, 600, 60)
   const drawnBefore = frames(undefined, before, T0, T0 + 60).at(-1)!
-  const was = drawnBefore.at // about 1600
+  const was = drawnBefore.at // about 1720
   const after = (m: number) => onFix(before, fix(m, T0 + 60), LINE)
 
   it('catches up forward over a few seconds when the new estimate is 200 m ahead', () => {
@@ -225,12 +225,13 @@ describe('a new report corrects the estimate without driving backwards', () => {
 
   it('stands still when the new estimate is 130 m behind, then moves on from there', () => {
     const track = after(was - 130)
-    const drawnSpeed = track.speed! * SPEED_FACTOR // 170 m in 60 s, halved
+    const drawnSpeed = track.speed! * SPEED_FACTOR // 290 m in 60 s, times 0.7
     const run = frames(drawnBefore, track, T0 + 60, T0 + 60 + 130 / drawnSpeed + 2)
     expect(run[0].mode).toBe('hold')
     const holding = run.filter((d) => d.mode === 'hold')
     expect(new Set(holding.map((d) => d.at))).toEqual(new Set([was]))
-    expect(holding.length).toBeGreaterThan(60 * 60)
+    // Held for as long as the estimate takes to cover the 130 m: about 38 s.
+    expect(holding.length).toBeCloseTo((130 / drawnSpeed) * 60, -1)
     const moved = run.at(-1)!
     expect(moved.mode).toBe('follow')
     expect(moved.at).toBeGreaterThan(was)
@@ -238,7 +239,7 @@ describe('a new report corrects the estimate without driving backwards', () => {
   })
 
   it('is moved back in one step when the new estimate stops before reaching it', () => {
-    // Nearly stopped: 10 m in 60 s, so 150 s of estimate covers 12.5 m of a 200 m gap.
+    // Nearly stopped: 10 m in 60 s, so 150 s of estimate covers 17.5 m of a 200 m gap.
     const slow = onFix(onFix(undefined, fix(was - 210, T0 + 0), LINE), fix(was - 200, T0 + 60), LINE)
     const run = frames(drawnBefore, slow, T0 + 60, T0 + 60 + PREDICT_S + 1)
     expect(run[0].mode).toBe('hold')
@@ -272,7 +273,7 @@ describe('a new report corrects the estimate without driving backwards', () => {
     const reports = [
       fix(1000, T0),
       fix(1300, T0 + 60),
-      fix(1420, T0 + 120), // 60 m behind the drawn bus when it arrives: it holds
+      fix(1420, T0 + 120), // 130 m behind the drawn bus when it arrives: it holds
       fix(1900, T0 + 180),
       fix(1400, T0 + 240),
       fix(1700, T0 + 300),
@@ -339,7 +340,7 @@ describe('a real bus from the recorded responses', () => {
   })
   const shape = shapes.shapes.get(shapes.trips.get(a.tripId!)!)!
 
-  it('is placed on its shape, and moves along it at half its measured speed', () => {
+  it('is placed on its shape, and moves along it at 0.7 of its measured speed', () => {
     expect(a.tripId).toBe('weekday_U6000_U600001_9')
     expect(b.fixSec - a.fixSec).toBe(107)
     const track = onFix(onFix(undefined, a, shape), b, shape)

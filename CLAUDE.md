@@ -420,12 +420,14 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   backward glide. A bus stays at its report on an unknown trip, over 50 m off its shape, on its
   first report on a trip, on an undecidable round-trip pass, or at over 90 km/h.
 - The constants, all calibration rather than contract, each beside its measurement in
-  `estimate.ts`: `SPEED_FACTOR` 0.5 (fewer pauses for more lag; tune by eye), `PREDICT_S` 150,
+  `estimate.ts`: `SPEED_FACTOR` 0.7 (0.5 was picked first for fewer pauses; the owner found it too laggy on
+  sight, so 0.7 trades more pauses for less lag; tune by eye), `PREDICT_S` 150,
   `OFF_ROUTE_M` 50, `BEARING_TOL_DEG` 60, `HOLD_MAX_M` 250, `CATCH_UP_S` 4, `MAX_KMH` 90,
   `NOISE_BACK_M` 60, `PASS_GAP_M` 300. `replay.test.ts` re-runs design.md's backtest on the
-  placement the app really uses and reproduces its 0.5 row (A: 178 m, 15%, 2%, lag 167 m; B:
-  155 m, 21%, 3%, 127 m). Judged when a response ARRIVES, corrections land ahead / holding /
-  jumping back 77 / 18 / 5% (A) and 70 / 24 / 6% (B), against design.md's expected 80 / 16-21 / 2-3.
+  placement the app really uses and reproduces its 0.7 row (A: 138 m, 27%, 5%, lag 101 m; B:
+  129 m, 29%, 6%, 69 m). Judged when a response ARRIVES, corrections land ahead / holding /
+  jumping back 65 / 27 / 7% (A) and 63 / 27 / 10% (B), against design.md's expected 72 / 28 / 5-6.
+  At 0.5 they were 77 / 18 / 5% and 70 / 24 / 6%.
 - What loads when: route names in the bundle; `data/bus-shapes.json` (540 KB, 125 KB gzipped) as a
   hashed `?url` asset fetched by `loadShapes()` on MapLibre's first `idle` after the overlay is
   added, in either view, only while buses are on; stops on the first bus view. State is

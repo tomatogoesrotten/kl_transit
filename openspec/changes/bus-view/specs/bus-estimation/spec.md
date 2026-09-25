@@ -17,7 +17,7 @@ timetable gives for the reported trip. The speed SHALL be the distance along the
 bus's last two distinct reports on the same trip, divided by the time between them, multiplied by a
 stated factor below one. The factor is chosen to make pauses rare at the cost of lag: a bus drawn
 ahead of the truth must wait for a new report to catch it up, and buses stop at lights and at stops.
-It SHALL be a single named value, tunable by eye, and is 0.5 at the outset. The feed's own speed field SHALL NOT be used.
+It SHALL be a single named value, tunable by eye, and is 0.7 at the outset. The feed's own speed field SHALL NOT be used.
 
 An estimate SHALL never be drawn off the shape, SHALL never move backwards along it, and SHALL never
 run past the shape's end.
@@ -26,7 +26,7 @@ run past the shape's end.
 
 - **WHEN** a bus reported 20 s ago, and its last two reports on this trip were 300 m apart along its
   route and 60 s apart in time
-- **THEN** it is drawn on its route, 50 m ahead of its last report at the outset factor of 0.5, and
+- **THEN** it is drawn on its route, 70 m ahead of its last report at the outset factor of 0.7, and
   still moving forward
 
 #### Scenario: A bus nearing the end of its route

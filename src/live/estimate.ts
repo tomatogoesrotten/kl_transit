@@ -23,12 +23,14 @@ import type { LiveVehicle } from './feed'
 /**
  * The share of the measured speed a bus is moved at. Below one ON PURPOSE: a
  * bus drawn ahead of the truth has to wait for the next report to catch up, and
- * buses stop at lights and at stops. Backtested on two afternoon samples: 0.5
- * makes the next report land behind the drawn bus 16 to 21% of the time
- * (against about 46% at 1.0), at the cost of a median lag of 130 to 170 m.
- * Taste within design.md's table; tuned by eye.
+ * buses stop at lights and at stops. Backtested on two afternoon samples: 0.7
+ * makes the next report land behind the drawn bus 28% of the time (against 16
+ * to 21% at 0.5 and about 46% at 1.0), for a median lag of 70 to 100 m
+ * (against 130 to 170 m at 0.5). 0.5 was picked first; the owner found it too
+ * laggy on sight, so 0.7 trades more pauses for less lag. Taste within
+ * design.md's table, tuned by eye.
  */
-export const SPEED_FACTOR = 0.5
+export const SPEED_FACTOR = 0.7
 
 /**
  * How long an estimate advances after the report it starts from, in seconds.
@@ -45,7 +47,7 @@ export const BEARING_TOL_DEG = 60
 
 /**
  * A new estimate up to this far behind the drawn bus makes it stand and wait;
- * farther, it jumps. At 0.5, 2 to 3% of fixes land more than 250 m behind.
+ * farther, it jumps. At 0.7, 5 to 6% of fixes land more than 250 m behind.
  * Standing 250 m at 17 km/h is about 50 s: a long red light.
  */
 export const HOLD_MAX_M = 250
