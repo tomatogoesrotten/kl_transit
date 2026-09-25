@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "models": "node scripts/build_train_models.mjs",
     "test": "vitest run",
-    "check:feed": "python scripts/check_feed.py data/network.json --self-test"
+    "check:feed": "python scripts/check_feed.py data/network.json --bus data --self-test"
   },
   "engines": {
     "node": ">=22.12"

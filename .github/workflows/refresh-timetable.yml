@@ -1,7 +1,8 @@
-# Rebuild data/network.json from the published GTFS feed, once a day.
+# Rebuild data/network.json and the three bus files (data/bus-*.json) from the
+# published GTFS feeds, once a day.
 #
 # This job has write access to the default branch and nobody is watching it, so:
-# it downloads only from the official API, it commits only data/network.json,
+# it downloads only from the official API, it commits only those four files,
 # it commits only when the checks pass, and it commits only when the data has
 # actually changed. If anything fails it stops without committing, the run goes
 # red, and GitHub emails the owner - the site keeps drawing the timetable it
@@ -43,9 +44,22 @@ jobs:
                'https://api.data.gov.my/gtfs-static/prasarana?category=rapid-rail-kl'
           unzip -q -o "$RUNNER_TEMP/feed.zip" -d "$RUNNER_TEMP/feed"
 
-      - name: Rebuild the network
-        # Into a temporary file, so a failure below leaves the committed data alone.
-        run: python scripts/build_network_json.py "$RUNNER_TEMP/feed" "$RUNNER_TEMP/rebuilt.json"
+      - name: Download the published bus GTFS feed
+        # The slash after `prasarana` matters: without it the API answers 301 to
+        # the slashed address and then 302 to the file, so follow redirects.
+        run: |
+          curl --fail --show-error --silent --location \
+               --retry 2 --retry-delay 5 --max-time 180 \
+               -o "$RUNNER_TEMP/bus-feed.zip" \
+               'https://api.data.gov.my/gtfs-static/prasarana/?category=rapid-bus-kl'
+          unzip -q -o "$RUNNER_TEMP/bus-feed.zip" -d "$RUNNER_TEMP/bus-feed"
+
+      - name: Rebuild the network and the bus data
+        # Into temporary files, so a failure below leaves the committed data alone.
+        run: |
+          python scripts/build_network_json.py "$RUNNER_TEMP/feed" "$RUNNER_TEMP/rebuilt.json"
+          mkdir -p "$RUNNER_TEMP/bus"
+          python scripts/build_bus_json.py "$RUNNER_TEMP/bus-feed" "$RUNNER_TEMP/bus"
 
       - name: Check the rebuilt data
         # Rules any correct timetable satisfies, compared against the file it
@@ -56,20 +70,26 @@ jobs:
         # --self-test breaks the data on purpose afterwards and fails if any
         # check sleeps through it, so every run's log shows the checks can still
         # fail. A check nobody has seen fail is not a check.
-        run: python scripts/check_feed.py "$RUNNER_TEMP/rebuilt.json" --against data/network.json --self-test
+        run: |
+          python scripts/check_feed.py "$RUNNER_TEMP/rebuilt.json" --against data/network.json \
+                 --bus "$RUNNER_TEMP/bus" --against-bus data --self-test
 
       - name: Commit, but only if the timetable actually changed
+        # All four files in one commit, so the rail and bus data never disagree
+        # about which day's feed they came from.
         run: |
           mv "$RUNNER_TEMP/rebuilt.json" data/network.json
-          if git diff --quiet -- data/network.json; then
-            echo 'The published timetable has not changed. Nothing to commit.'
+          mv "$RUNNER_TEMP"/bus/bus-*.json data/
+          FILES='data/network.json data/bus-routes.json data/bus-shapes.json data/bus-stops.json'
+          if git diff --quiet -- $FILES; then
+            echo 'The published timetables have not changed. Nothing to commit.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add data/network.json
+          git add $FILES
           git commit \
             -m 'chore: refresh the timetable from the published feed' \
-            -m 'Rebuilt by .github/workflows/refresh-timetable.yml from the official API, api.data.gov.my/gtfs-static/prasarana?category=rapid-rail-kl. The feed checks passed.' \
+            -m 'Rebuilt by .github/workflows/refresh-timetable.yml from the official API, api.data.gov.my/gtfs-static/prasarana?category=rapid-rail-kl and ?category=rapid-bus-kl. The feed checks passed.' \
             -m 'The tests pinned to the previous snapshot may now fail. That means the timetable changed: look at what moved and update them. Do not loosen them so that a refresh can pass.'
           git push

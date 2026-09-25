@@ -107,7 +107,7 @@ const NULL_ISLAND_DEG = 0.1
  * drawn in Johor - filtering to the Klang Valley would be deciding for the feed
  * where its trains ought to be.
  */
-const BOX = { minLat: 0.5, maxLat: 7.5, minLon: 99, maxLon: 105 }
+export const BOX = { minLat: 0.5, maxLat: 7.5, minLon: 99, maxLon: 105 }
 
 /**
  * Presence, not value. The bindings put every field's default on the message

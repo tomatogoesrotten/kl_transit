@@ -71,7 +71,8 @@ correct timetable satisfies: no line missing its departures, trains running at t
 nothing running at three in the morning, no timetabled journey faster than 120 km/h. That is what
 the daily refresh runs, because it has to pass on a timetable nobody has looked at yet.
 
-It also breaks the data on purpose, six ways, and prints whether each check noticed. A check nobody
+It also breaks the data on purpose, eight ways for the rail timetable and eleven for the bus data,
+and prints whether each check noticed. A check nobody
 has seen fail is not a check.
 
 ## Rebuilding the data
@@ -86,12 +87,23 @@ python scripts/build_network_json.py data/gtfs data/network.json
 npm run check:feed
 ```
 
+The bus data (`data/bus-routes.json`, `data/bus-shapes.json`, `data/bus-stops.json`) is generated
+the same way from the bus feed. The raw bus feed is not kept in the repository. Note the slash after
+`prasarana`: without it the API redirects twice, which `-L` follows.
+
+```
+curl -L -o bus.zip 'https://api.data.gov.my/gtfs-static/prasarana/?category=rapid-bus-kl'
+unzip bus.zip -d bus-feed
+python scripts/build_bus_json.py bus-feed data
+npm run check:feed
+```
+
 The script turns the GTFS feed into one compact file: one path per line, every station projected
 onto it, one stop-time template per direction, and the headway windows per day type.
 
 This also happens by itself. `.github/workflows/refresh-timetable.yml` runs daily at 20:00 UTC —
-04:00 in Kuala Lumpur, after the last train and before the first — and it downloads the feed,
-rebuilds the file, runs the feed checks, and commits **only if the checks pass and the data actually
+04:00 in Kuala Lumpur, after the last train and before the first — and it downloads both feeds,
+rebuilds the four files, runs the feed checks, and commits **only if the checks pass and the data actually
 changed.** An unchanged feed leaves no trace.
 
 If the checks fail it commits nothing and the run goes red. The site then keeps drawing the

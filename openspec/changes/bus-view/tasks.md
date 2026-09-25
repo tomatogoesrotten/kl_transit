@@ -24,7 +24,7 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 2. Stage 1: static bus data
 
-- [ ] 2.1 Write `scripts/build_bus_json.py FEED_DIR OUT_DIR` with pandas, writing
+- [x] 2.1 Write `scripts/build_bus_json.py FEED_DIR OUT_DIR` with pandas, writing
       `data/bus-routes.json` (route id to `[short name, long name]`), `data/bus-shapes.json` (`origin`
       copied from `network.json`'s projection constants, shapes simplified with the rail script's
       Douglas-Peucker at 5 m and rounded to 5 decimals, trip id to shape id) and `data/bus-stops.json`
@@ -32,7 +32,7 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       running it on the feed from `https://api.data.gov.my/gtfs-static/prasarana/?category=rapid-bus-kl`
       (follow redirects): 137 routes, 4,053 stops, 171 shapes, 2,097 trips; shapes near 515 KB raw and
       126 KB gzipped, stops near 232 KB and 73 KB. Record the actual sizes in the pull request.
-- [ ] 2.2 Add `src/bus.test.ts` (beside `network.test.ts`) pinning values measured from this snapshot:
+- [x] 2.2 Add `src/bus.test.ts` (beside `network.test.ts`) pinning values measured from this snapshot:
       the counts above, `U3000` is `300`, `T3048` is `T304`, every stop inside the Peninsular box, every
       trip's shape present with at least two points. Verify `npm test` passes and fails if a count is
       edited.
