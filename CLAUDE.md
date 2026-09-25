@@ -234,7 +234,7 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 - Per-line visibility filters the layers' data and the frame's trains. It must NEVER recompute the
   shared-track corridors from the visible subset — that would snap 8.5 km of line sideways for a
   checkbox.
-- Milestone 7 built: a daily GitHub Actions refresh, the deploy config, the README and the app's
+- Milestone 7 done: a daily GitHub Actions refresh, the deploy config, the README and the app's
   "about this data". Issue #27, and #7 fixed with it.
 - THERE ARE TWO KINDS OF CHECK AND THEY MUST NOT BE CONFUSED. `npm test` describes THIS SNAPSHOT —
   six files assert values measured from it (corridor ranges, a station's 105 m offset, Ampang's

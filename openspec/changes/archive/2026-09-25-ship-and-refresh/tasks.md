@@ -66,9 +66,9 @@
 
 - [x] 5.1 Run `npm test`, `npm run build` and the feed check; all must pass, with the existing 223
       tests green and `npm audit` at 0.
-- [ ] 5.2 Trigger the refresh workflow manually and confirm it does the right thing on a feed that
+- [x] 5.2 Trigger the refresh workflow manually and confirm it does the right thing on a feed that
       has not changed: checks pass, nothing committed.
-- [ ] 5.3 **Deploy, and look at the deployed URL** — not at localhost. Per `CLAUDE.md`, a visual
+- [x] 5.3 **Deploy, and look at the deployed URL** — not at localhost. Per `CLAUDE.md`, a visual
       criterion is not met until a human has seen it, and a thing that works locally and not when
       deployed is the classic case.
 - [x] 5.4 Update `CLAUDE.md`'s Status and Commands, and open a pull request referencing issue #27
