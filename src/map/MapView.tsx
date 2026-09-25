@@ -623,7 +623,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // The last report seen for the selected live vehicle, so that once it is
     // dropped for age the card can still say how long ago it last reported.
     let lastVehicle: LiveVehicle | undefined
-    // At most two requests a minute, from this one poller. In the same effect
+    // At most three requests in any minute, from this one poller. In the same effect
     // as the loop so the development double-mount stops the first one; the
     // request times live in the module, so the remount cannot fetch early.
     const stopPolling = startPolling()

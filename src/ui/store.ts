@@ -393,7 +393,7 @@ const WAITING: LiveFeed = {
 /**
  * The live vehicles and each feed's condition.
  *
- * Written by the poller once per response, which is at most twice a minute,
+ * Written by the poller once per response, which is at most three times a minute,
  * with one `setState` for the whole response. The frame loop reads it with
  * `getState()` and nothing subscribes to it: the counts and status lines are
  * painted through refs like every other number on screen.
@@ -442,7 +442,7 @@ export function receive(
     vehicles.length === 0 && Object.values(rejected).every((n) => n === 0)
   useLive.setState({
     [mode]: {
-      held: dropGone(mergeFixes(feed.held, vehicles), nowMs),
+      held: dropGone(mergeFixes(feed.held, vehicles, nowMs), nowMs),
       version: feed.version + 1,
       status: { state: nothing ? 'empty' : 'ok', lastOkMs: nowMs, rejected },
     },

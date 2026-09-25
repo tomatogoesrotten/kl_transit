@@ -158,10 +158,10 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 11. Stage 4: on the map and in the card
 
-- [ ] 11.1 Change polling to `{ bus: 30_000, ktm: 120_000 }` with a 10 s minimum gap between any two
+- [x] 11.1 Change polling to `{ bus: 30_000, ktm: 120_000 }` with a 10 s minimum gap between any two
       requests. Verify with a test that ten simulated minutes of ticks give about 20 bus and 5 KTM
       requests and never more than 3 in any 60 s window.
-- [ ] 11.2 Export `untilNextMs(mode)` from `poll.ts`, and give `mergeFixes` a `receivedMs` so each held
+- [x] 11.2 Export `untilNextMs(mode)` from `poll.ts`, and give `mergeFixes` a `receivedMs` so each held
       fix records when it arrived. Verify `feed.test.ts` for the new field.
 - [ ] 11.3 In BOTH views, keep tracks and drawn states inside `liveLayers`' closure, call `onFix` on a
       version change and `drawnAt` every frame, and place and turn bus arrows (rail view) and models

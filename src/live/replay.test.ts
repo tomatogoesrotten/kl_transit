@@ -64,7 +64,8 @@ function replay(urls: string[]) {
     frames++
     let newFix = false
     while (next < rs.length && rs[next].atMs <= t) {
-      held = mergeFixes(held, rs[next++].vehicles)
+      const r = rs[next++]
+      held = mergeFixes(held, r.vehicles, r.atMs)
       newFix = true
     }
     for (const v of held.values()) {

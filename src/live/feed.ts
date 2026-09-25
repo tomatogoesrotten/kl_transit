@@ -70,6 +70,12 @@ export interface LiveVehicle {
   bearing: number | null
   /** The report's own timestamp, epoch seconds. */
   fixSec: number
+  /**
+   * When this report reached us, epoch ms. Set by `mergeFixes`, not the
+   * decoder, so the card can tell "the feed answered since, with nothing newer
+   * for this bus" from "this report is the latest answer".
+   */
+  receivedMs?: number
 }
 
 /**
@@ -255,15 +261,19 @@ export function decodeFeed(bytes: Uint8Array, mode: LiveMode): Decoded {
  * response never moves a vehicle backwards. Rejected reports never get here,
  * which is why a vehicle held at a real position and next reported at 0,0
  * stays where it was. Returns a new map; `held` is not touched.
+ *
+ * @param receivedMs When the response arrived, epoch ms, recorded on each
+ *   report that is taken in. A report kept from before keeps its own.
  */
 export function mergeFixes(
   held: ReadonlyMap<string, LiveVehicle>,
   vehicles: readonly LiveVehicle[],
+  receivedMs: number,
 ): Map<string, LiveVehicle> {
   const out = new Map(held)
   for (const v of vehicles) {
     const had = out.get(v.id)
-    if (!had || v.fixSec > had.fixSec) out.set(v.id, v)
+    if (!had || v.fixSec > had.fixSec) out.set(v.id, { ...v, receivedMs })
   }
   return out
 }
@@ -311,18 +321,19 @@ export function dropGone(
 }
 
 /**
- * Each feed at most once a minute. The documented limit for GTFS Realtime is 4
- * requests a minute; two feeds every 30 s would sit exactly on it, with no room
- * for a reload, a second tab or React's development double-mount. The content
- * changes about once a minute for buses and every two for KTM fixes anyway.
+ * How often each feed is asked for. Buses every 30 s: the bus feed itself
+ * changes only every 60 to 80 s, so this picks a new report up sooner - which
+ * matters now that a report corrects a moving estimate - but does not make any
+ * report fresher. KTM every 120 s, which is how often its fixes change.
+ *
+ * With `MIN_GAP_MS` that is 2.5 requests a minute, and never more than 3 in any
+ * 60 s, against the documented GTFS Realtime limit of 4 (429 beyond it): room
+ * for a reload, a second tab or React's development double-mount.
  */
-export const POLL_MS = 60_000
+export const POLL_MS: Record<LiveMode, number> = { bus: 30_000, ktm: 120_000 }
 
-/**
- * And never within 30 s of the OTHER feed's request, so the API sees at most
- * one request every 30 s from this page, whichever modes are on.
- */
-export const STAGGER_MS = 30_000
+/** And never within 10 s of the OTHER feed's request, so the two never land together. */
+export const MIN_GAP_MS = 10_000
 
 /**
  * Whether a mode's feed may be requested now, as far as timing goes. The caller
@@ -333,5 +344,14 @@ export const STAGGER_MS = 30_000
  */
 export function due(mode: LiveMode, nowMs: number, last: Readonly<Record<LiveMode, number>>) {
   const other: LiveMode = mode === 'bus' ? 'ktm' : 'bus'
-  return nowMs - last[mode] >= POLL_MS && nowMs - last[other] >= STAGGER_MS
+  return nowMs - last[mode] >= POLL_MS[mode] && nowMs - last[other] >= MIN_GAP_MS
+}
+
+/**
+ * Milliseconds until a mode's feed is next due, never negative: 0 when it is
+ * due now, or has never been asked for. For the card's countdown to the next
+ * CHECK - which is not the next report; half the bus checks bring nothing new.
+ */
+export function untilDue(mode: LiveMode, nowMs: number, last: Readonly<Record<LiveMode, number>>) {
+  return Math.max(0, last[mode] + POLL_MS[mode] - nowMs)
 }
