@@ -25,6 +25,8 @@ import sys
 PEAK = 8 * 3600      # 08:00 on a weekday: the network should be full of trains
 NIGHT = 3 * 3600     # 03:00: nothing should be running
 MAX_KMH = 120.0      # no train on this network goes faster than this
+MAX_SPREAD_M = 500.0 # stops sharing a name are one interchange, a walk apart at most
+MIN_SPLIT_M = 100.0  # two different stations are never this close
 DAY = 86400
 DAY_TYPES = ('MonFri', 'Sat', 'Sun')
 
@@ -114,6 +116,40 @@ def check(net, old=None):
     note.append(f'fastest timetabled segment {fastest:.1f} km/h - {where}, '
                 f'{MAX_KMH - fastest:.1f} km/h under the limit')
 
+    # --- station names that no longer mean one place ---------------------------
+    # src/sim/places.ts groups stops into one place when, and only when, their
+    # names are equal. Distance cannot do that job - a walking interchange can be
+    # wider than the gap between two neighbouring stations - so these two rules
+    # guard the names instead: a shared name reused across town would merge two
+    # stations, and one station spelled two ways would split an interchange.
+    # Measured between published coordinates in the network's flat projection,
+    # the same metric as the track, never haversine.
+    kx, ky = net['origin']['kx'], net['origin']['ky']
+    ids = list(net['stations'])
+    widest, widest_where = 0.0, 'no shared names'
+    closest, closest_where = float('inf'), 'fewer than two stations'
+    for i, a in enumerate(ids):
+        sa = net['stations'][a]
+        for b in ids[i + 1:]:
+            sb = net['stations'][b]
+            metres = (((sa['lon'] - sb['lon']) * kx) ** 2 + ((sa['lat'] - sb['lat']) * ky) ** 2) ** 0.5
+            if sa['name'] == sb['name']:
+                if metres > MAX_SPREAD_M:
+                    fail.append(f"name-spread: {a} and {b} are both \"{sa['name']}\" but "
+                                f"{metres:.0f} m apart, over the {MAX_SPREAD_M:.0f} m limit")
+                if metres > widest:
+                    widest, widest_where = metres, f"{sa['name']} {a}-{b}"
+            else:
+                if metres < MIN_SPLIT_M:
+                    fail.append(f"name-split: {a} \"{sa['name']}\" and {b} \"{sb['name']}\" "
+                                f"are {metres:.0f} m apart, under the {MIN_SPLIT_M:.0f} m minimum")
+                if metres < closest:
+                    closest, closest_where = metres, f"{sa['name']} {a} and {sb['name']} {b}"
+    note.append(f'widest same-name spread {widest:.1f} m - {widest_where}, '
+                f'{MAX_SPREAD_M - widest:.1f} m under the limit')
+    note.append(f'closest differently-named stops {closest:.1f} m - {closest_where}, '
+                f'{closest - MIN_SPLIT_M:.1f} m over the minimum')
+
     return fail, note
 
 
@@ -149,6 +185,26 @@ def break_a_journey_time(net):
     s[1]['dep'] = s[1]['arr']
 
 
+def same_name_pairs(net):
+    """Every pair of stops sharing a name, closest first. Found in the data, never named."""
+    kx, ky = net['origin']['kx'], net['origin']['ky']
+    st = net['stations']
+    ids = list(st)
+    pairs = [(((st[a]['lon'] - st[b]['lon']) * kx) ** 2 + ((st[a]['lat'] - st[b]['lat']) * ky) ** 2, a, b)
+             for i, a in enumerate(ids) for b in ids[i + 1:] if st[a]['name'] == st[b]['name']]
+    return sorted(pairs)
+
+
+def break_a_name_spread(net):
+    _, _, b = same_name_pairs(net)[0]
+    net['stations'][b]['lat'] += 5000 / net['origin']['ky']    # about 5 km north
+
+
+def break_a_name_split(net):
+    _, _, b = same_name_pairs(net)[0]
+    net['stations'][b]['name'] += ' (renamed)'
+
+
 CASES = [
     ('a line removed', break_a_line, 'lines:'),
     ('a station removed', break_a_station, 'stations:'),
@@ -156,6 +212,8 @@ CASES = [
     ('every train moved to mid-morning', break_the_peak, 'peak:'),
     ('a headway window stretched across the night', break_the_night, 'night:'),
     ('a journey time cut to five seconds', break_a_journey_time, 'speed:'),
+    ('one stop of a shared name moved 5 km away', break_a_name_spread, 'name-spread:'),
+    ('one stop of the closest same-name pair renamed', break_a_name_split, 'name-split:'),
 ]
 
 

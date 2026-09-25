@@ -1,4 +1,5 @@
 export { network } from './network'
+export { places } from './places'
 export { prepare } from './prepare'
 export {
   DAY,
