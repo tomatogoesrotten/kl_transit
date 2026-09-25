@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { network } from '../sim'
+import { LIVE_MODES, MODE_NAME } from '../live/feed'
+import { LIVE_STYLE } from '../map/live'
 import { ink } from './format'
 import { panels } from './readout'
 import { useView } from './store'
@@ -31,7 +34,8 @@ const shortName = (name: string) => name.replace(/ Line$/, '')
  */
 export function LinesPanel() {
   const hidden = useView((s) => s.hidden)
-  const { toggleLine, goToStation } = useView.getState()
+  const liveOff = useView((s) => s.liveOff)
+  const { toggleLine, toggleLive, goToStation } = useView.getState()
   // Read once, at first render, and never in the frame loop.
   const [open, setOpen] = useState(() => window.innerWidth > PHONE)
 
@@ -39,6 +43,9 @@ export function LinesPanel() {
     return () => {
       panels.counts.clear()
       panels.total = null
+      panels.liveCounts.clear()
+      panels.liveStatus.clear()
+      panels.liveNote = null
     }
   }, [])
 
@@ -107,6 +114,64 @@ export function LinesPanel() {
             </li>
           )
         })}
+      </ul>
+
+      {/* The live group. Not lines: these are vehicles the feeds report, drawn
+          where they last reported. The count, the status and the note are
+          written by the frame loop through `panels`, like the counts above. */}
+      <h3 className="live-head">Live GPS</h3>
+      <p
+        className="live-note"
+        hidden
+        ref={(el) => {
+          panels.liveNote = el
+        }}
+      >
+        Buses and KTM ETS trains are hidden: live positions are only shown at the present moment. Press Now to
+        see them.
+      </p>
+      <ul className="line-list">
+        {LIVE_MODES.map((mode) => (
+          <li key={mode}>
+            <label>
+              <input
+                type="checkbox"
+                checked={!liveOff.has(mode)}
+                onChange={() => toggleLive(mode)}
+                aria-label={`Show ${MODE_NAME[mode]}`}
+              />
+              {/* The legend: the colour this mode is drawn in. */}
+              <span
+                className="swatch swatch-live"
+                aria-hidden="true"
+                // Both views' colours; the stylesheet picks the one on screen.
+                style={
+                  {
+                    '--live-city': `rgb(${LIVE_STYLE.color.city[mode].join(',')})`,
+                    '--live-wireframe': `rgb(${LIVE_STYLE.color.wireframe[mode].join(',')})`,
+                  } as CSSProperties
+                }
+              />
+              <span className="line-name">{MODE_NAME[mode]}</span>
+              <span
+                className="n"
+                title="Shown"
+                ref={(el) => {
+                  if (el) panels.liveCounts.set(mode, el)
+                  else panels.liveCounts.delete(mode)
+                }}
+              />
+            </label>
+            <p
+              className="live-status"
+              hidden
+              ref={(el) => {
+                if (el) panels.liveStatus.set(mode, el)
+                else panels.liveStatus.delete(mode)
+              }}
+            />
+          </li>
+        ))}
       </ul>
     </details>
   )

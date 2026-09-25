@@ -15,4 +15,9 @@ export default defineConfig({
     // the module where its worker is.
     exclude: ['maplibre-gl'],
   },
+  // The recorded GTFS-Realtime responses in src/live/fixtures. Tests load them
+  // with `?inline`, as base64, because the project has no @types/node and so no
+  // `node:fs`. Vite only inlines file types it knows to be assets, and `.pb`
+  // is not one of them by default. No app code imports these.
+  assetsInclude: ['**/*.pb'],
 })

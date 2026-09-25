@@ -35,11 +35,16 @@ import {
 import type { TrainInstance } from './trains'
 import { FOOTPRINT_LAYER, layerOps, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
+import { liveLayers } from './live'
+import type { LiveItem } from './live'
+import { startPolling } from '../live/poll'
+import { LIVE_MODES } from '../live/feed'
+import type { LiveMode, LiveVehicle } from '../live/feed'
 import { ModeSwitch } from '../ui/ModeSwitch'
-import { distinctSelections, findTrain, trainSelection } from '../ui/inspect'
-import { paintCard, paintCounts, paintReadout, panels, showTip } from '../ui/readout'
+import { distinctSelections, findTrain, trainSelection, vehicleHover } from '../ui/inspect'
+import { paintCard, paintCounts, paintLive, paintReadout, panels, showTip } from '../ui/readout'
 import type { Selection } from '../ui/store'
-import { setMs, useClock, useView } from '../ui/store'
+import { setMs, useClock, useLive, useView } from '../ui/store'
 
 // The OpenFreeMap "liberty" style already ships a `building-3d` fill-extrusion
 // layer (minzoom 14), so there is nothing for us to add — just zoom in past 14.
@@ -142,6 +147,8 @@ interface Statics {
   busyVersion: number
   /** The hidden set the layers above were built from. Compared by identity. */
   hidden: ReadonlySet<string>
+  /** The live bus and KTM layers, rebuilt inside only when something visible changed. */
+  live: ReturnType<typeof liveLayers>
 }
 
 /**
@@ -161,9 +168,14 @@ interface Frame {
 }
 
 /** What is under the pointer, in a few words, or null when it is empty map. */
+/** Every live mode, as the switched-off set passed while the clock is not live. */
+const ALL_LIVE_OFF: ReadonlySet<LiveMode> = new Set(LIVE_MODES)
+
 function hoverText(layerId: string | undefined, object: unknown, now: Frame | null): string | null {
   if (!object || !layerId || !now) return null
   if (layerId === 'stations') return rail.stations[(object as StationDot).id]?.name ?? null
+  // Live layers only exist while the clock is live, so `now.ms` is the present.
+  if (layerId.startsWith('live-')) return vehicleHover((object as LiveItem).v, now.ms)
   if (!layerId.startsWith('trains-')) return null
   // By id, against this frame's own trains: the instance carries an identity
   // and nothing else, so that the renderer holds no references to the
@@ -185,6 +197,10 @@ function pickToSelection(layerId: string | undefined, object: unknown, now: Fram
   if (layerId === 'stations') {
     const dot = object as StationDot
     return [{ kind: 'station', lineId: dot.line, stopId: dot.id }]
+  }
+  if (layerId.startsWith('live-')) {
+    const { v } = object as LiveItem
+    return [{ kind: 'vehicle', mode: v.mode, id: v.id }]
   }
   if (!layerId.startsWith('trains-')) return []
   const train = now.trains.find((tr) => tr.id === (object as TrainInstance).id)
@@ -224,6 +240,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   const styleLayers = useRef<ReturnType<Map['getStyle']>['layers']>([])
   const [styleLoaded, setStyleLoaded] = useState(false)
   const [mode, setMode] = useState<MapMode>(readMode)
+  // The mode for the frame loop, which is created once on mount and would
+  // otherwise see only the mode it started with. Kept in step by the mode effect.
+  const modeRef = useRef(mode)
   // What the frame loop last computed, for the pick handlers to read. They fire
   // between frames, so they cannot recompute any of it themselves without
   // disagreeing with what is on the screen.
@@ -362,7 +381,8 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // is say so, where the prototype promised it and implemented nothing.
     m.getCanvas().setAttribute(
       'aria-label',
-      'Map of Klang Valley rail lines with trains placed by the timetable. ' +
+      'Map of Klang Valley rail lines with trains placed by the timetable, and Rapid KL ' +
+        'buses and KTM ETS trains at their live GPS positions, each showing how old its position is. ' +
         'Arrow keys move the view, plus and minus zoom. ' +
         'Stations can be selected from the lines panel.',
     )
@@ -474,6 +494,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             stations: stationLayer(dots, beforeId, 0, m.getZoom()),
             busyVersion: 0,
             hidden,
+            live: liveLayers(beforeId),
           }
           overlay.current = deck
         }
@@ -498,6 +519,13 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     let lastPanels = 0
     let lastSelection: Selection | null = null
     let lastCardOpen = false
+    // The last report seen for the selected live vehicle, so that once it is
+    // dropped for age the card can still say how long ago it last reported.
+    let lastVehicle: LiveVehicle | undefined
+    // At most two requests a minute, from this one poller. In the same effect
+    // as the loop so the development double-mount stops the first one; the
+    // request times live in the module, so the remount cannot fetch early.
+    const stopPolling = startPolling()
     const tick = (now: number) => {
       // Re-armed first, so a throw below costs one frame rather than the whole
       // animation.
@@ -522,7 +550,15 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       const t = klNow(ms, c.override)
       const trains = activeTrains(rail, t.sec, t.today, t.yesterday)
       const any = trains.length > 0
-      const view = useView.getState()
+      let view = useView.getState()
+      const live = c.mode === 'live'
+      // Present-day GPS drawn against another moment would be a lie, so live
+      // vehicles leave the map when the clock does - and a selected one stops
+      // being selected, once, the first frame it happens.
+      if (!live && view.selection?.kind === 'vehicle') {
+        view.select(null)
+        view = useView.getState()
+      }
       // What the pick handlers read when the pointer moves or something is
       // clicked, so that a pick always answers about the frame on screen.
       latest.current = { trains, t, ms }
@@ -556,7 +592,19 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         lastCardOpen = view.cardOpen
         lastPanels = now
         paintCounts(trains)
-        if (view.selection && view.cardOpen) paintCard(rail, view.selection, trains, t, ms)
+        const feeds = useLive.getState()
+        paintLive(feeds, view.liveOff, live, ms)
+        const sel = view.selection
+        if (sel && view.cardOpen) {
+          let vehicle: LiveVehicle | undefined
+          if (sel.kind === 'vehicle') {
+            const held = feeds[sel.mode].held.get(sel.id)
+            if (held) lastVehicle = held
+            else if (lastVehicle?.mode !== sel.mode || lastVehicle.id !== sel.id) lastVehicle = undefined
+            vehicle = lastVehicle
+          }
+          paintCard(rail, sel, trains, t, ms, vehicle)
+        }
       }
 
       const deck = overlay.current
@@ -646,8 +694,19 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       //
       // Order is draw order: the trains go last, so a train standing at a
       // platform is drawn over its own station marker rather than under it.
+      // Live vehicles go FIRST, so every line, station and train is drawn over
+      // the buses where they cross - a hundred buses must not bury the network.
+      // Left out entirely while the clock is not live: every mode is passed as
+      // off, which also makes `liveLayers` forget its instances (see there).
+      const liveNow = s.live(useLive.getState(), live ? view.liveOff : ALL_LIVE_OFF, ms, zoom, modeRef.current)
       deck.setProps({
-        layers: [s.lines, cam.shared, s.stations, ...trainLayers(byMode, W, s.beforeId)],
+        layers: [
+          ...liveNow,
+          s.lines,
+          cam.shared,
+          s.stations,
+          ...trainLayers(byMode, W, s.beforeId),
+        ],
       })
     }
     frame.current = requestAnimationFrame(tick)
@@ -656,6 +715,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       // In the same cleanup as the map, or React's development double-mount
       // leaves two loops racing on one overlay.
       cancelAnimationFrame(frame.current)
+      stopPolling()
       sizes.disconnect()
       offGoTo()
       m.getContainer().removeEventListener('pointerdown', notePointer)
@@ -683,6 +743,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // lets CSS select on it — no prop-drilling, no store, and no component needs
     // to know. A third view later would be CSS alone.
     document.documentElement.dataset.mapMode = mode
+    // Before the early return: the frame loop reads it whether or not the style
+    // has loaded, and the live markers' colour changes with it.
+    modeRef.current = mode
 
     const m = map.current
     if (!m || !styleLoaded) return

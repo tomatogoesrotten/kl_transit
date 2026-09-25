@@ -30,7 +30,7 @@ export function App() {
       >
         {/* Collapsed, this is all that is left: an information mark, whose
             label carries the honesty rule for anyone who reads labels. */}
-        <summary aria-label="About KL Rail. Train positions are scheduled, not live.">
+        <summary aria-label="About KL Rail. Train positions are scheduled, not live. Bus and KTM ETS positions are live GPS.">
           <span className="i" aria-hidden="true">
             i
           </span>
@@ -42,9 +42,16 @@ export function App() {
         {/* The honesty rule, in a sentence rather than a fragment: a reader who
             skims "scheduled, not live" can still think it means a delayed feed. */}
         <span>
-          Every train here is placed by Prasarana&rsquo;s published timetable, not by GPS. Rapid
-          Rail has no live position feed, so this shows where trains are scheduled to be, not
+          Every rail train here is placed by Prasarana&rsquo;s published timetable, not by GPS.
+          Rapid Rail has no live position feed, so this shows where trains are scheduled to be, not
           where they are.
+        </span>
+        {/* The other half, since issue #40: two kinds of position side by side,
+            and the viewer must never have to guess which one is which. */}
+        <span>
+          Rapid KL buses and KTM ETS trains are different: they are live GPS, drawn where each last
+          reported itself, and each shows how old its position is. They appear only while the
+          clock is at the present moment.
         </span>
         {/* The way back into the guide, which is otherwise shown once and never
             again. A guide nobody can see twice is a guide nobody can recommend. */}
@@ -83,6 +90,27 @@ export function App() {
               convention, not a second railway.
             </li>
             <li>
+              <strong>The KTMB live feed carries only ETS intercity trains.</strong> It has no KTM
+              Komuter trains in it at all, so Komuter trains may well be running although none are
+              shown here.
+            </li>
+            <li>
+              <strong>Live ages are measured by this device&rsquo;s clock.</strong> A clock that is
+              a few minutes out makes every bus look fresher or staler than it is. A &ldquo;live&rdquo;
+              position is the one the vehicle last reported, usually a minute or two ago, and it
+              jumps when the next one arrives &mdash; nothing is predicted in between.
+            </li>
+            <li>
+              <strong>Buses are named by the feed&rsquo;s route id.</strong> The feed says{' '}
+              <code>U3000</code>, not the route number 300 on the bus. Looking the numbers up is a
+              later change.
+            </li>
+            <li>
+              <strong>KTM ETS speed and heading are placeholders in the feed.</strong> Every ETS train
+              reports heading north at 90, so they are drawn as discs with no direction, and no
+              speed is shown for anything.
+            </li>
+            <li>
               <strong>An interchange appears once per line.</strong> The feed gives a station its
               own stop for each line it serves, so KL Sentral is several stations here rather than
               one.
@@ -93,9 +121,10 @@ export function App() {
               branding anywhere in this app. The map's own credit to OpenFreeMap
               and OpenStreetMap is in MapLibre's attribution control, bottom right. */}
           <p className="credit">
-            Timetable from data.gov.my (Prasarana, rapid-rail-kl), under the Terms of Use for
-            Government Open Data Malaysia 1.0. An unofficial project, not connected to Prasarana
-            or Rapid Rail.
+            Timetable from data.gov.my (Prasarana, rapid-rail-kl). Live positions from data.gov.my
+            GTFS Realtime (Prasarana, rapid-bus-kl; KTMB). Under the Terms of Use for Government
+            Open Data Malaysia 1.0. An unofficial project, not connected to Prasarana, Rapid Rail,
+            Rapid KL or KTMB.
           </p>
         </details>
       </details>

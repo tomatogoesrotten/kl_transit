@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { setTimeOfDay } from '../sim'
 import type { DayType } from '../sim'
+import { dropGone, mergeFixes, NO_REJECTS } from '../live/feed'
+import type { Decoded, LiveMode, LiveVehicle, Rejected } from '../live/feed'
 
 /**
  * How the clock is behaving.
@@ -120,7 +122,17 @@ export interface StationSelection {
   stopId: string
 }
 
-export type Selection = TrainSelection | StationSelection
+/**
+ * A live bus or KTM vehicle, by the feed's own vehicle id. No `lineId`: it is on
+ * no rail line, so everything that reads one narrows on `kind` first.
+ */
+export interface VehicleSelection {
+  kind: 'vehicle'
+  mode: LiveMode
+  id: string
+}
+
+export type Selection = TrainSelection | StationSelection | VehicleSelection
 
 export interface ViewStore {
   selection: Selection | null
@@ -153,6 +165,8 @@ export interface ViewStore {
   goTo: { stopId: string; n: number } | null
   /** Line ids the viewer has switched off. Replaced, never mutated - see `toggleLine`. */
   hidden: ReadonlySet<string>
+  /** Live modes the viewer has switched off. Replaced, never mutated, like `hidden`. */
+  liveOff: ReadonlySet<LiveMode>
 
   select: (selection: Selection | null) => void
   closeCard: () => void
@@ -164,6 +178,7 @@ export interface ViewStore {
   stopFollowing: () => void
   followedGone: () => void
   toggleLine: (lineId: string) => void
+  toggleLive: (mode: LiveMode) => void
 }
 
 /**
@@ -187,6 +202,7 @@ export const useView = create<ViewStore>()((set, get) => ({
   choices: NO_CHOICES,
   goTo: null,
   hidden: new Set<string>(),
+  liveOff: new Set<LiveMode>(),
 
   // Selecting something new never inherits the last thing's follow. Following a
   // train while reading about a different one is a camera that has run away.
@@ -242,14 +258,119 @@ export const useView = create<ViewStore>()((set, get) => ({
     const hidden = new Set(get().hidden)
     if (!hidden.delete(lineId)) hidden.add(lineId)
     const selection = get().selection
-    const gone = selection !== null && hidden.has(selection.lineId)
+    const gone = selection !== null && selection.kind !== 'vehicle' && hidden.has(selection.lineId)
     set(
       gone
         ? { hidden, selection: null, cardOpen: false, following: false, choices: NO_CHOICES }
         : { hidden, choices: NO_CHOICES },
     )
   },
+
+  // The same for a live mode. Switching it off also stops its feed being
+  // requested; the poller reads `liveOff` on every tick.
+  toggleLive: (mode) => {
+    const liveOff = new Set(get().liveOff)
+    if (!liveOff.delete(mode)) liveOff.add(mode)
+    const selection = get().selection
+    const gone = selection?.kind === 'vehicle' && liveOff.has(selection.mode)
+    set(
+      gone
+        ? { liveOff, selection: null, cardOpen: false, following: false, choices: NO_CHOICES }
+        : { liveOff, choices: NO_CHOICES },
+    )
+  },
 }))
+
+/**
+ * What a live feed is doing, said per mode.
+ *
+ * - `waiting`: nothing asked yet, or the first answer is not back.
+ * - `ok` / `empty`: it answered, with vehicles or with none. The KTM feed
+ *   alternated between nine and none in sampling, so an empty answer is not
+ *   "no trains" and does not erase the ones held.
+ * - `unavailable`: the request failed - network, timeout, or a non-2xx that is
+ *   not a 429. A 429 without CORS headers also lands here, which is still true.
+ * - `rate-limited`: the API answered 429.
+ * - `unreadable`: it answered with something that is not a feed message.
+ */
+export interface LiveStatus {
+  state: 'waiting' | 'ok' | 'empty' | 'unavailable' | 'rate-limited' | 'unreadable'
+  /** When the feed last answered with something decodable, epoch ms. */
+  lastOkMs: number | null
+  /** The reports in the LATEST response that could not be drawn. */
+  rejected: Rejected
+}
+
+export interface LiveFeed {
+  /** Vehicle id to its newest usable report. Replaced, never mutated. */
+  held: ReadonlyMap<string, LiveVehicle>
+  /** Bumped whenever `held` is replaced, so the map can rebuild its layer on a number. */
+  version: number
+  status: LiveStatus
+}
+
+export type LiveStore = Record<LiveMode, LiveFeed>
+
+const WAITING: LiveFeed = {
+  held: new Map(),
+  version: 0,
+  status: { state: 'waiting', lastOkMs: null, rejected: NO_REJECTS },
+}
+
+/**
+ * The live vehicles and each feed's condition.
+ *
+ * Written by the poller once per response, which is at most twice a minute,
+ * with one `setState` for the whole response. The frame loop reads it with
+ * `getState()` and nothing subscribes to it: the counts and status lines are
+ * painted through refs like every other number on screen.
+ */
+export const useLive = create<LiveStore>()(() => ({ bus: WAITING, ktm: WAITING }))
+
+/**
+ * One feed's answer, into the store: one write, whatever happened.
+ *
+ * A failed or empty answer never erases what is held. Those vehicles stay,
+ * ageing honestly, until `dropGone` says they are past ten minutes - which is
+ * checked here too, so the held set does not grow for ever.
+ *
+ * @param answer The decoded body, or why there was none to decode.
+ * @param nowMs The present, epoch ms.
+ */
+export function receive(
+  mode: LiveMode,
+  answer: Decoded | 'unavailable' | 'rate-limited',
+  nowMs: number,
+) {
+  const feed = useLive.getState()[mode]
+  if (typeof answer === 'string' || !answer.ok) {
+    const held = dropGone(feed.held, nowMs)
+    useLive.setState({
+      [mode]: {
+        held,
+        version: held === feed.held ? feed.version : feed.version + 1,
+        status: {
+          state: typeof answer === 'string' ? answer : 'unreadable',
+          lastOkMs: feed.status.lastOkMs,
+          // The latest response had no reports in it to reject.
+          rejected: NO_REJECTS,
+        },
+      },
+    })
+    return
+  }
+  const { vehicles, rejected } = answer
+  const nothing =
+    vehicles.length === 0 && Object.values(rejected).every((n) => n === 0)
+  useLive.setState({
+    [mode]: {
+      held: dropGone(mergeFixes(feed.held, vehicles), nowMs),
+      version: feed.version + 1,
+      status: { state: nothing ? 'empty' : 'ok', lastOkMs: nowMs, rejected },
+    },
+  })
+}
+
 
 /**
  * Writes the simulated moment.
