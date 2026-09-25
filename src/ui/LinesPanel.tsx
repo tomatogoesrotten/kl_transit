@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { PLACES } from '../rail'
 import { network } from '../sim'
 import { LIVE_MODES, MODE_NAME } from '../live/feed'
 import { LIVE_STYLE } from '../map/live'
 import { ink } from './format'
 import { panels } from './readout'
+import { findPlaces, firstShownStop } from './search'
 import { useView } from './store'
 
 /** The width below which the layout is one column and this panel starts closed. */
@@ -12,6 +14,8 @@ const PHONE = 760
 
 /** "LRT Ampang Line" -> "LRT Ampang". The word is the same on every row. */
 const shortName = (name: string) => name.replace(/ Line$/, '')
+
+const lineById = new Map(network.lines.map((line) => [line.id, line]))
 
 /**
  * One row per line: its colour, its name, how many of its trains are running,
@@ -38,6 +42,10 @@ export function LinesPanel() {
   const { toggleLine, toggleLive, goToStation } = useView.getState()
   // Read once, at first render, and never in the frame loop.
   const [open, setOpen] = useState(() => window.innerWidth > PHONE)
+  // What the viewer typed. React state: a person changes it, and nothing in the
+  // frame loop reads it.
+  const [query, setQuery] = useState('')
+  const found = findPlaces(PLACES, query)
 
   useEffect(() => {
     return () => {
@@ -60,6 +68,62 @@ export function LinesPanel() {
           }}
         />
       </summary>
+
+      {/* Find a station by name. One entry per place, not per line: Titiwangsa
+          is one result with four pills. Choosing one does what a station button
+          below does, via the same action, so the map, the card and the label
+          highlight all follow from the selection. */}
+      <div className="search">
+        <input
+          type="search"
+          aria-label="Find a station by name"
+          placeholder="Find a station"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {query.trim() !== '' && (
+          // Polite: the count of results is worth hearing, not worth interrupting for.
+          <div aria-live="polite">
+            {found.length === 0 ? (
+              <p className="no-match">No station matches</p>
+            ) : (
+              <ul className="results">
+                {found.map((place) => {
+                  const target = firstShownStop(place, network.lines, hidden)
+                  return (
+                    <li key={place.id}>
+                      <button
+                        className="stop result"
+                        // Every line serving it is hidden, so there is nothing
+                        // drawn to go to — as a hidden line's stop buttons.
+                        disabled={!target}
+                        onClick={() => target && goToStation({ kind: 'station', ...target })}
+                      >
+                        <span>{place.name}</span>
+                        <span className="result-lines">
+                          {place.lines.map((id) => {
+                            const line = lineById.get(id)
+                            return line ? (
+                              <span
+                                key={id}
+                                className="pill"
+                                style={{ background: line.color, color: ink(line.color) }}
+                              >
+                                {line.code}
+                              </span>
+                            ) : null
+                          })}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+
       <ul className="line-list">
         {network.lines.map((line) => {
           const off = hidden.has(line.id)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layerOps, WIREFRAME } from './modes'
+import { layerOps, stationNameFilters, WIREFRAME } from './modes'
 import type { MapMode, StyleLayer } from './modes'
 
 // Abridged from liberty: one layer of each category the rules name, plus two
@@ -130,6 +130,36 @@ describe('layerOps', () => {
       expect(Object.keys(opFor('city', layer.id).paint).sort()).toEqual(
         Object.keys(opFor('wireframe', layer.id).paint).sort(),
       )
+    }
+  })
+})
+
+describe('stationNameFilters', () => {
+  const rank = ['>=', ['get', 'rank'], 1]
+  const transit = ['match', ['get', 'class'], ['airport', 'bus', 'rail'], true, false]
+  const layers: StyleLayer[] = [
+    { id: 'poi_r1', type: 'symbol', 'source-layer': 'poi', filter: rank },
+    { id: 'poi_transit', type: 'symbol', 'source-layer': 'poi', filter: transit },
+    { id: 'poi_bare', type: 'symbol', 'source-layer': 'poi' },
+    { id: 'label_city', type: 'symbol', 'source-layer': 'place', filter: rank },
+    { id: 'poi_fill', type: 'fill', 'source-layer': 'poi' },
+  ]
+  const notRailway = ['!=', ['get', 'class'], 'railway']
+
+  it('adds the railway exclusion to every POI symbol layer, keeping its own filter', () => {
+    expect(stationNameFilters(layers)).toEqual([
+      { id: 'poi_r1', filter: ['all', rank, notRailway] },
+      // Bus stops keep drawing: their filter still admits `bus`.
+      { id: 'poi_transit', filter: ['all', transit, notRailway] },
+      { id: 'poi_bare', filter: notRailway },
+    ])
+  })
+
+  it('is never undone by a mode switch, because no mode op carries a filter', () => {
+    for (const mode of ['city', 'wireframe'] as MapMode[]) {
+      for (const op of layerOps(layers, mode)) {
+        expect(Object.keys(op).sort()).toEqual(['id', 'paint', 'visibility'])
+      }
     }
   })
 })
