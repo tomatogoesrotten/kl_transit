@@ -3,6 +3,7 @@ import { setTimeOfDay } from '../sim'
 import type { DayType } from '../sim'
 import { dropGone, mergeFixes, NO_REJECTS } from '../live/feed'
 import type { Decoded, LiveMode, LiveVehicle, Rejected } from '../live/feed'
+import type { BusShapes, BusStop } from '../live/busdata'
 
 /**
  * How the clock is behaving.
@@ -134,6 +135,39 @@ export interface VehicleSelection {
 
 export type Selection = TrainSelection | StationSelection | VehicleSelection
 
+/**
+ * What the map is OF: the timetabled rail network, or the live buses and their
+ * stops. A whole-map choice like the map style, and remembered like it.
+ */
+export type TransitView = 'rail' | 'bus'
+
+const VIEW_KEY = 'kl-rail.transit-view'
+
+/** Rail by default. Anything but the exact string is rail, so a bad stored value retires quietly. */
+function rememberedView(): TransitView {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'bus' ? 'bus' : 'rail'
+  } catch {
+    // A private window or blocked site data, or no browser at all (the tests).
+    return 'rail'
+  }
+}
+
+/**
+ * Puts the view on <html> as `data-transit-view`, as `MapView` does the map
+ * style, so CSS can follow it without a prop. Guarded like `rememberedView`.
+ */
+function markView(view: TransitView) {
+  try {
+    document.documentElement.dataset.transitView = view
+  } catch {
+    // No document: the tests run in Node.
+  }
+}
+
+const INITIAL_VIEW = rememberedView()
+markView(INITIAL_VIEW)
+
 export interface ViewStore {
   selection: Selection | null
   /**
@@ -167,6 +201,12 @@ export interface ViewStore {
   hidden: ReadonlySet<string>
   /** Live modes the viewer has switched off. Replaced, never mutated, like `hidden`. */
   liveOff: ReadonlySet<LiveMode>
+  /**
+   * Rail or bus. React state because a person changes it; the frame loop reads
+   * it with `getState()` every frame, as it does `hidden`, so switching never
+   * recreates the loop.
+   */
+  transitView: TransitView
 
   select: (selection: Selection | null) => void
   closeCard: () => void
@@ -179,6 +219,7 @@ export interface ViewStore {
   followedGone: () => void
   toggleLine: (lineId: string) => void
   toggleLive: (mode: LiveMode) => void
+  setTransitView: (view: TransitView) => void
 }
 
 /**
@@ -203,6 +244,7 @@ export const useView = create<ViewStore>()((set, get) => ({
   goTo: null,
   hidden: new Set<string>(),
   liveOff: new Set<LiveMode>(),
+  transitView: INITIAL_VIEW,
 
   // Selecting something new never inherits the last thing's follow. Following a
   // train while reading about a different one is a camera that has run away.
@@ -279,6 +321,20 @@ export const useView = create<ViewStore>()((set, get) => ({
         : { liveOff, choices: NO_CHOICES },
     )
   },
+
+  // Only the view. The camera, the clock, the map style, the selection and
+  // which lines and modes are on are all left exactly as they were: changing
+  // what the map is about is not moving it.
+  setTransitView: (transitView) => {
+    if (get().transitView === transitView) return
+    set({ transitView })
+    markView(transitView)
+    try {
+      localStorage.setItem(VIEW_KEY, transitView)
+    } catch {
+      // Not remembering is not a failure worth showing anybody.
+    }
+  },
 }))
 
 /**
@@ -309,7 +365,24 @@ export interface LiveFeed {
   status: LiveStatus
 }
 
-export type LiveStore = Record<LiveMode, LiveFeed>
+export type LiveFeeds = Record<LiveMode, LiveFeed>
+
+/**
+ * A static data file fetched after first paint: not asked for yet, on its way,
+ * arrived, or failed. Said in the lines panel while it is not simply ready.
+ */
+export type LoadState = 'idle' | 'loading' | 'ready' | 'failed'
+
+export interface LiveStore extends LiveFeeds {
+  /** The bus stops, fetched the first time the bus view is shown. See `loadStops`. */
+  stops: { state: LoadState; data: readonly BusStop[] | null }
+  /**
+   * The route shapes estimation moves buses along, fetched in the background
+   * after the map has first drawn, while buses are on. See `loadShapes`. Until
+   * they are ready no bus is estimated, or described as estimated.
+   */
+  shapes: { state: LoadState; data: BusShapes | null }
+}
 
 const WAITING: LiveFeed = {
   held: new Map(),
@@ -320,12 +393,17 @@ const WAITING: LiveFeed = {
 /**
  * The live vehicles and each feed's condition.
  *
- * Written by the poller once per response, which is at most twice a minute,
+ * Written by the poller once per response, which is at most three times a minute,
  * with one `setState` for the whole response. The frame loop reads it with
  * `getState()` and nothing subscribes to it: the counts and status lines are
  * painted through refs like every other number on screen.
  */
-export const useLive = create<LiveStore>()(() => ({ bus: WAITING, ktm: WAITING }))
+export const useLive = create<LiveStore>()(() => ({
+  bus: WAITING,
+  ktm: WAITING,
+  stops: { state: 'idle', data: null },
+  shapes: { state: 'idle', data: null },
+}))
 
 /**
  * One feed's answer, into the store: one write, whatever happened.
@@ -364,7 +442,7 @@ export function receive(
     vehicles.length === 0 && Object.values(rejected).every((n) => n === 0)
   useLive.setState({
     [mode]: {
-      held: dropGone(mergeFixes(feed.held, vehicles), nowMs),
+      held: dropGone(mergeFixes(feed.held, vehicles, nowMs), nowMs),
       version: feed.version + 1,
       status: { state: nothing ? 'empty' : 'ok', lastOkMs: nowMs, rejected },
     },

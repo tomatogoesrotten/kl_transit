@@ -11,6 +11,8 @@ import json, math, re, sys
 import pandas as pd
 import numpy as np
 
+from geometry import LAT0, LON0, KX, KY, to_xy, rdp    # shared with build_bus_json.py
+
 G = (sys.argv[1] if len(sys.argv) > 1 else 'gtfs').rstrip('/') + '/'     # folder with the unzipped GTFS .txt files
 OUT = sys.argv[2] if len(sys.argv) > 2 else 'network.json'
 routes = pd.read_csv(G + 'routes.txt')
@@ -20,13 +22,6 @@ st = pd.read_csv(G + 'stop_times.txt')
 shapes = pd.read_csv(G + 'shapes.txt')
 freq = pd.read_csv(G + 'frequencies.txt')
 
-LAT0, LON0 = 3.12, 101.62           # local projection origin (roughly the middle of the network)
-KX = math.cos(math.radians(LAT0)) * 111320.0
-KY = 110574.0
-
-
-def to_xy(lon, lat):
-    return (lon - LON0) * KX, (lat - LAT0) * KY
 
 
 def secs(t):
@@ -51,32 +46,6 @@ def pretty(name):
         else:
             out.append(w.capitalize())
     return ' '.join(out)
-
-
-# ---------- geometry helpers ----------
-def rdp(pts, eps):
-    """Douglas-Peucker simplification on local-metre coordinates. Returns kept indices."""
-    keep = np.zeros(len(pts), bool)
-    keep[0] = keep[-1] = True
-    stack = [(0, len(pts) - 1)]
-    while stack:
-        a, b = stack.pop()
-        if b <= a + 1:
-            continue
-        p, q = pts[a], pts[b]
-        seg = q - p
-        L = np.hypot(*seg)
-        mid = pts[a + 1:b]
-        if L == 0:
-            d = np.hypot(*(mid - p).T)
-        else:
-            d = np.abs(seg[0] * (mid[:, 1] - p[1]) - seg[1] * (mid[:, 0] - p[0])) / L
-        i = int(np.argmax(d))
-        if d[i] > eps:
-            k = a + 1 + i
-            keep[k] = True
-            stack += [(a, k), (k, b)]
-    return np.where(keep)[0]
 
 
 def project(pt, xy, cum, min_along):

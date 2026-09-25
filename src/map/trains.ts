@@ -213,13 +213,20 @@ export function trainInstances(
  * GPU state, so a fresh `data` array regenerates the attributes on its own and
  * needs no `updateTriggers`.
  */
-export function trainLayers(byMode: Record<Mode, TrainInstance[]>, W: number, beforeId: string) {
+export function trainLayers(
+  byMode: Record<Mode, TrainInstance[]>,
+  W: number,
+  beforeId: string,
+  // Below 1 in the bus view, which dims rail without hiding it. Still pickable.
+  opacity = 1,
+) {
   return MODES.map(
     (mode) =>
       new ScenegraphLayer<TrainInstance, Interleaved>({
         id: `trains-${mode}`,
         data: byMode[mode],
         beforeId,
+        opacity,
         pickable: true,
         scenegraph: MODEL_URL[mode],
         // Flat, and said out loud rather than left to the default: it is the

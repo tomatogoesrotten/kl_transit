@@ -21,7 +21,7 @@ import { MapLibreOverlay } from '@deck.gl/maplibre'
 import { activeTrains, klNow } from '../sim'
 import type { ActiveTrain, KlTime } from '../sim'
 import { arrivalZoom, panelPadding } from './camera'
-import { cameraLayers, labelLayerId, lineLayer, stationLayer } from './layers'
+import { cameraLayers, dimmer, labelLayerId, lineLayer, stationLayer } from './layers'
 import {
   chooseLabels,
   LABEL_FONT,
@@ -47,14 +47,18 @@ import {
 import type { TrainInstance } from './trains'
 import { FOOTPRINT_LAYER, layerOps, stationNameFilters, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
-import { liveLayers } from './live'
+import { BUS_VIEW_RAIL_OPACITY, busStopLayers, liveLayers, routeLayers } from './live'
 import type { LiveItem } from './live'
-import { startPolling } from '../live/poll'
+import { startPolling, untilNextMs } from '../live/poll'
+import { loadShapes, loadStops } from '../live/busdata'
+import type { BusStop } from '../live/busdata'
 import { LIVE_MODES } from '../live/feed'
 import type { LiveMode, LiveVehicle } from '../live/feed'
 import { ModeSwitch } from '../ui/ModeSwitch'
+import { ViewSwitch } from '../ui/ViewSwitch'
 import { distinctSelections, findTrain, trainSelection, vehicleHover } from '../ui/inspect'
-import { paintCard, paintCounts, paintLive, paintReadout, panels, showTip } from '../ui/readout'
+import type { BusMotion } from '../ui/inspect'
+import { paintCaption, paintCard, paintCounts, paintLive, paintReadout, panels, showTip } from '../ui/readout'
 import type { Selection } from '../ui/store'
 import { setMs, useClock, useLive, useView } from '../ui/store'
 import { PLACES, rail } from '../rail'
@@ -195,6 +199,20 @@ interface Statics {
   hidden: ReadonlySet<string>
   /** The live bus and KTM layers, rebuilt inside only when something visible changed. */
   live: ReturnType<typeof liveLayers>
+  /** The bus stops, once they have arrived. Rebuilt inside only when the gate or the style flips. */
+  stops: ReturnType<typeof busStopLayers>
+  /** The selected bus's route, while it moves on an estimate. */
+  route: ReturnType<typeof routeLayers>
+  /**
+   * The static rail layers at the bus view's opacity. Each hands back the same
+   * instance until its source layer or the view changes - see `dimmer`.
+   */
+  dim: {
+    lines: ReturnType<typeof dimmer<ReturnType<typeof lineLayer>>>
+    shared: ReturnType<typeof dimmer<ReturnType<typeof lineLayer>>>
+    stations: ReturnType<typeof dimmer<ReturnType<typeof stationLayer>>>
+    labels: ReturnType<typeof dimmer<ReturnType<typeof labelLayer>>>
+  }
 }
 
 /**
@@ -220,8 +238,13 @@ const ALL_LIVE_OFF: ReadonlySet<LiveMode> = new Set(LIVE_MODES)
 function hoverText(layerId: string | undefined, object: unknown, now: Frame | null): string | null {
   if (!object || !layerId || !now) return null
   if (layerId === 'stations') return rail.stations[(object as StationDot).id]?.name ?? null
+  // A stop says its name, as published, and that it is a bus stop.
+  if (layerId === 'bus-stops') return `Bus stop: ${(object as BusStop)[1]}`
   // Live layers only exist while the clock is live, so `now.ms` is the present.
-  if (layerId.startsWith('live-')) return vehicleHover((object as LiveItem).v, now.ms)
+  if (layerId.startsWith('live-')) {
+    const item = object as LiveItem
+    return vehicleHover(item.v, now.ms, item.motion?.estimated === true)
+  }
   if (!layerId.startsWith('trains-')) return null
   // By id, against this frame's own trains: the instance carries an identity
   // and nothing else, so that the renderer holds no references to the
@@ -248,6 +271,9 @@ function pickToSelection(layerId: string | undefined, object: unknown, now: Fram
     const { v } = object as LiveItem
     return [{ kind: 'vehicle', mode: v.mode, id: v.id }]
   }
+  // Bus stops fall through here too, on purpose: a stop has a name and nothing
+  // else honest to say, so clicking one selects nothing and it never crowds a
+  // pick that also found a train or a bus.
   if (!layerId.startsWith('trains-')) return []
   const train = now.trains.find((tr) => tr.id === (object as TrainInstance).id)
   return train ? [trainSelection(train, now.t, now.ms)] : []
@@ -286,6 +312,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   const styleLayers = useRef<ReturnType<Map['getStyle']>['layers']>([])
   const [styleLoaded, setStyleLoaded] = useState(false)
   const [mode, setMode] = useState<MapMode>(readMode)
+  // Rail or bus. Subscribed here for the base map's own bus stops, which change
+  // only when a person switches; the frame loop reads the store itself.
+  const transitView = useView((s) => s.transitView)
   // The mode for the frame loop, which is created once on mount and would
   // otherwise see only the mode it started with. Kept in step by the mode effect.
   const modeRef = useRef(mode)
@@ -299,6 +328,10 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   // Hover is for pointers that hover. Without this a tap flashes a description
   // before the card opens, because a browser sends a mousemove before a click.
   const coarse = useRef(false)
+  // The live vehicle under a still pointer, so the quarter-second gate can
+  // repaint its age. deck.gl fires onHover only when the pointer MOVES, so a tip
+  // written there alone would say "45 s ago" for as long as the pointer rests.
+  const hovered = useRef<{ v: LiveVehicle; x: number; y: number } | null>(null)
   // The last camera padding applied, so a one-shot move to a station is framed
   // in the same visible box the follow camera centres in.
   const padding = useRef<PaddingOptions>({ top: 0, right: 0, bottom: 0, left: 0 })
@@ -435,13 +468,12 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // MapLibre already gives its canvas tabindex="0" and its own keyboard
     // handler, so arrow keys pan and +/- zoom once it has focus. All this does
     // is say so, where the prototype promised it and implemented nothing.
-    m.getCanvas().setAttribute(
-      'aria-label',
-      'Map of Klang Valley rail lines with trains placed by the timetable, and Rapid KL ' +
-        'buses and KTM ETS trains at their live GPS positions, each showing how old its position is. ' +
-        'Arrow keys move the view, plus and minus zoom. ' +
-        'Stations can be selected from the lines panel.',
-    )
+    // What the map shows depends on the view, so the label is written by the
+    // view effect below, not here.
+
+    // Set on MapLibre's first `idle` after the overlay is added. Never set
+    // without WebGL2, where nothing could be moved anyway.
+    let mapDrawn = false
 
     m.on('load', () => {
       // Before addControl. deck.gl's interleaved overlay inserts its layers into
@@ -506,12 +538,18 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             // radius it is uncatchable. Wider again for a fingertip.
             pickingRadius: PICK_RADIUS,
             onHover: (info) => {
+              const id = info.layer?.id
+              hovered.current =
+                !coarse.current && info.object && id?.startsWith('live-')
+                  ? { v: (info.object as LiveItem).v, x: info.x, y: info.y }
+                  : null
               if (coarse.current) return showTip(null, 0, 0)
-              showTip(hoverText(info.layer?.id, info.object, latest.current), info.x, info.y)
+              showTip(hoverText(id, info.object, latest.current), info.x, info.y)
             },
             onClick: (info) => {
               const now = latest.current
               if (!now) return
+              hovered.current = null
               showTip(null, 0, 0)
               // Every candidate under the click, not just the topmost one.
               //
@@ -544,6 +582,12 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             },
           })
           m.addControl(deck)
+          // The route shapes wait for this: style, first tiles and the first
+          // overlay frame all drawn, so 126 KB of shapes never competes with
+          // them. See the frame loop, and design.md, "Loading".
+          m.once('idle', () => {
+            mapDrawn = true
+          })
           const camera = cameraLayers(rail, CORRIDORS, beforeId)
           // From the store, not from the default: it is what the loop will
           // compare against, and starting from a different empty set would
@@ -564,6 +608,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             labelKey: '',
             hidden,
             live: liveLayers(beforeId),
+            stops: busStopLayers(beforeId),
+            route: routeLayers(beforeId),
+            dim: { lines: dimmer(), shared: dimmer(), stations: dimmer(), labels: dimmer() },
           }
           overlay.current = deck
         }
@@ -591,7 +638,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // The last report seen for the selected live vehicle, so that once it is
     // dropped for age the card can still say how long ago it last reported.
     let lastVehicle: LiveVehicle | undefined
-    // At most two requests a minute, from this one poller. In the same effect
+    // At most three requests in any minute, from this one poller. In the same effect
     // as the loop so the development double-mount stops the first one; the
     // request times live in the module, so the remount cannot fetch early.
     const stopPolling = startPolling()
@@ -667,19 +714,54 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         lastPanels = now
         paintCounts(trains)
         const feeds = useLive.getState()
-        paintLive(feeds, view.liveOff, live, ms)
+        const drawnLive = statics.current?.live
+        paintLive(feeds, view.liveOff, live, ms, view.transitView, drawnLive?.unestimated())
+        paintCaption(view.transitView, feeds.shapes.state === 'ready', m.getCanvas())
+        // The hovered vehicle's newest report, so its age moves with the clock
+        // and resets when a new report lands. When the vehicle leaves the map
+        // (clock not live, mode switched off, report too old) the tip goes too.
+        const h = hovered.current
+        if (h) {
+          const v = live && !view.liveOff.has(h.v.mode) ? feeds[h.v.mode].held.get(h.v.id) : undefined
+          if (v) showTip(vehicleHover(v, ms, drawnLive?.item(v.mode, v.id)?.motion?.estimated === true), h.x, h.y)
+          else {
+            hovered.current = null
+            showTip(null, 0, 0)
+          }
+        }
         const sel = view.selection
         if (sel && view.cardOpen) {
           let vehicle: LiveVehicle | undefined
+          let motion: BusMotion | undefined
           if (sel.kind === 'vehicle') {
             const held = feeds[sel.mode].held.get(sel.id)
             if (held) lastVehicle = held
             else if (lastVehicle?.mode !== sel.mode || lastVehicle.id !== sel.id) lastVehicle = undefined
             vehicle = lastVehicle
+            if (sel.mode === 'bus' && held) {
+              // What the map drew for it last frame decides the wording, never
+              // the view: a bus is called estimated only while it is drawn so.
+              const drawn = drawnLive?.item('bus', sel.id)?.motion
+              const lastOk = feeds.bus.status.lastOkMs
+              motion = {
+                estimated: drawn?.estimated === true,
+                why: drawn?.still ?? (feeds.shapes.state === 'failed' ? 'shapes-failed' : null),
+                nextCheckMs: untilNextMs('bus'),
+                noNewer: held.receivedMs !== undefined && lastOk !== null && lastOk > held.receivedMs,
+              }
+            }
           }
-          paintCard(rail, sel, trains, t, ms, vehicle)
+          paintCard(rail, sel, trains, t, ms, vehicle, motion)
         }
       }
+
+      // The stops are fetched the first time the bus view is shown, and never
+      // for a visit that stays in the rail view. Free after the first call.
+      const busView = view.transitView === 'bus'
+      if (busView) void loadStops()
+      // The route shapes, in either view, once the map has drawn, and only
+      // while buses are on. Free after the first call.
+      if (mapDrawn && !view.liveOff.has('bus')) void loadShapes()
 
       const deck = overlay.current
       const s = statics.current
@@ -823,20 +905,53 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       // own station marker rather than under it, and the names go last of all,
       // over the lines and the trains (the owner's call: a name you cannot read
       // is no use). Names are not pickable, so a train under one still answers.
-      // Live vehicles go FIRST, so every line, station and train is drawn over
-      // the buses where they cross - a hundred buses must not bury the network.
+      // In the rail view live vehicles go FIRST, so every line, station and train
+      // is drawn over the buses where they cross - a hundred buses must not bury
+      // the network. The bus view turns that round; see the list below.
       // Left out entirely while the clock is not live: every mode is passed as
       // off, which also makes `liveLayers` forget its instances (see there).
-      const liveNow = s.live(useLive.getState(), live ? view.liveOff : ALL_LIVE_OFF, ms, zoom, modeRef.current)
+      const feeds = useLive.getState()
+      const liveNow = s.live(
+        feeds,
+        live ? view.liveOff : ALL_LIVE_OFF,
+        ms,
+        zoom,
+        modeRef.current,
+        view.transitView,
+        W,
+        feeds.shapes.data,
+      )
+      // The bus view dims the whole rail network, names included, and keeps it
+      // pickable. The static layers are re-dimmed only when they or the view
+      // change (see `dimmer`); trains are new every frame and take it directly.
+      const opacity = busView ? BUS_VIEW_RAIL_OPACITY : 1
+      const railLayers = [
+        s.dim.lines(s.lines, opacity),
+        s.dim.shared(cam.shared, opacity),
+        s.dim.stations(s.stations, opacity),
+        ...trainLayers(byMode, W, s.beforeId, opacity),
+      ]
+      const names = s.dim.labels(s.labels, opacity)
+      // Kept in the list in both views, hidden by `visible`, so it is never
+      // finalized and handed back. Null until the stops have arrived.
+      const stops = s.stops(feeds.stops.data, modeRef.current, view.transitView, zoom)
+      const stopLayers = stops ? [stops] : []
+      // The selected bus's route, only while it is drawn on an estimate: the
+      // path its estimate assumes. Under the buses, in both views.
+      const sel = view.selection
+      const motion = live && sel?.kind === 'vehicle' ? s.live.item(sel.mode, sel.id)?.motion : null
+      const route = s.route(
+        motion?.estimated && motion.shapeId ? (feeds.shapes.data?.shapes.get(motion.shapeId) ?? null) : null,
+        modeRef.current,
+      )
+      const routeLayer = route ? [route] : []
       deck.setProps({
-        layers: [
-          ...liveNow,
-          s.lines,
-          cam.shared,
-          s.stations,
-          ...trainLayers(byMode, W, s.beforeId),
-          s.labels,
-        ],
+        // Rail view: buses first, under everything - a hundred buses must not
+        // bury the network. Bus view: the reverse, dimmed rail first, then
+        // stops, buses and KTM over it. Names last in both.
+        layers: busView
+          ? [...railLayers, ...stopLayers, ...routeLayer, ...liveNow, names]
+          : [...routeLayer, ...liveNow, ...stopLayers, ...railLayers, names],
       })
     }
     frame.current = requestAnimationFrame(tick)
@@ -890,7 +1005,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       value: unknown,
     ) => void
 
-    for (const { id, visibility, paint } of layerOps(styleLayers.current, mode)) {
+    for (const { id, visibility, paint } of layerOps(styleLayers.current, mode, transitView)) {
       m.setLayoutProperty(id, 'visibility', visibility)
       for (const [name, value] of Object.entries(paint)) setPaint(id, name, value)
     }
@@ -901,7 +1016,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       'visibility',
       mode === 'wireframe' ? 'visible' : 'none',
     )
-  }, [mode, styleLoaded])
+  }, [mode, styleLoaded, transitView])
 
   return (
     <>
@@ -913,6 +1028,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
           saveMode(next)
         }}
       />
+      <ViewSwitch />
       {/* Last, so it is drawn over the panels, and written by the pick handlers
           through a ref rather than by React: hover fires on every pointer
           movement, and a setState per event re-renders the tree mid-drag. */}

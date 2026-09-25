@@ -1,4 +1,4 @@
-import { decodeFeed, due, FEED_URL, LIVE_MODES } from './feed'
+import { decodeFeed, due, FEED_URL, LIVE_MODES, untilDue } from './feed'
 import type { LiveMode } from './feed'
 import { receive, useClock, useView } from '../ui/store'
 
@@ -50,6 +50,11 @@ function tick() {
     // staggered: the second waits for `due` to see the first one's time.
     if (!off.has(mode) && !inFlight[mode] && due(mode, now, last)) return void request(mode)
   }
+}
+
+/** Milliseconds until a mode's feed is next asked for, for the card's countdown. See `untilDue`. */
+export function untilNextMs(mode: LiveMode): number {
+  return untilDue(mode, performance.now(), last)
 }
 
 /** Starts polling; returns the function that stops it. Called from the map's mount effect. */

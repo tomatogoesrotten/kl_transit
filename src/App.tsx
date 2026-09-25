@@ -5,6 +5,8 @@ import { Card, Chooser, FollowTag } from './ui/Card'
 import { Guide } from './ui/Guide'
 import { LinesPanel } from './ui/LinesPanel'
 import { TimeBar } from './ui/TimeBar'
+import { panels as painted } from './ui/readout'
+import { PREDICT_S } from './live/estimate'
 
 export function App() {
   // The panels along the bottom, handed to the map so the camera knows how much
@@ -30,7 +32,15 @@ export function App() {
       >
         {/* Collapsed, this is all that is left: an information mark, whose
             label carries the honesty rule for anyone who reads labels. */}
-        <summary aria-label="About KL Rail. Train positions are scheduled, not live. Bus and KTM ETS positions are live GPS.">
+        {/* Its label names the view and how buses are placed, both of which
+            change, so the frame loop writes it (`paintCaption`), as it does the
+            two sentences below: whether buses are estimated is live-feed state,
+            and nothing in React subscribes to that. */}
+        <summary
+          ref={(el) => {
+            painted.about = el
+          }}
+        >
           <span className="i" aria-hidden="true">
             i
           </span>
@@ -46,13 +56,21 @@ export function App() {
           Rapid Rail has no live position feed, so this shows where trains are scheduled to be, not
           where they are.
         </span>
-        {/* The other half, since issue #40: two kinds of position side by side,
-            and the viewer must never have to guess which one is which. */}
-        <span>
-          Rapid KL buses and KTM ETS trains are different: they are live GPS, drawn where each last
-          reported itself, and each shows how old its position is. They appear only while the
-          clock is at the present moment.
-        </span>
+        {/* The other half, since issue #40: kinds of position side by side, and
+            the viewer must never have to guess which one is which. Since #43 a
+            bus is an estimate once the route shapes have loaded, and not before. */}
+        <span
+          ref={(el) => {
+            painted.liveKinds = el
+          }}
+        />
+        {/* Which of the two the map puts in front, since the Rail/Bus switch.
+            Both kinds of position above stay true in either view. */}
+        <span
+          ref={(el) => {
+            painted.viewLine = el
+          }}
+        />
         {/* The way back into the guide, which is otherwise shown once and never
             again. A guide nobody can see twice is a guide nobody can recommend. */}
         <button className="guide-link" onClick={() => guide.current?.showModal()}>
@@ -96,19 +114,35 @@ export function App() {
             </li>
             <li>
               <strong>Live ages are measured by this device&rsquo;s clock.</strong> A clock that is
-              a few minutes out makes every bus look fresher or staler than it is. A &ldquo;live&rdquo;
-              position is the one the vehicle last reported, usually a minute or two ago, and it
-              jumps when the next one arrives &mdash; nothing is predicted in between.
+              a few minutes out makes every bus look fresher or staler than it is. A KTM ETS
+              position is the one the train last reported, usually a minute or two ago, and it jumps
+              when the next one arrives &mdash; nothing is predicted in between.
             </li>
             <li>
-              <strong>Buses are named by the feed&rsquo;s route id.</strong> The feed says{' '}
-              <code>U3000</code>, not the route number 300 on the bus. Looking the numbers up is a
-              later change.
+              <strong>A bus between reports is an estimate.</strong> Once the route shapes have
+              loaded, each bus is moved along its published route from its last GPS report, somewhat
+              slower than the speed measured between its own last two reports, and for at most{' '}
+              {PREDICT_S} seconds.
+              Each new report corrects it: a bus drawn ahead of the truth stands still until the
+              estimate catches up, or jumps back if it is far out, which is why buses sometimes
+              pause or jump. It never drives backwards. A bus off its route, or on a trip the
+              timetable does not know, is shown at its report instead, and says why.
+            </li>
+            <li>
+              <strong>The bus feed itself refreshes about once a minute.</strong> It is checked
+              every 30 seconds, which picks up a new report sooner but does not make any report
+              fresher: half the checks bring nothing new.
+            </li>
+            <li>
+              <strong>Bus route numbers, routes and stops come from the published bus
+              timetable</strong>, refreshed daily. The live feed says <code>U3000</code>; the
+              timetable says that is route 300, and both are shown. A route id the timetable does
+              not know is shown as the feed gives it, labelled as a feed id, never guessed.
             </li>
             <li>
               <strong>KTM ETS speed and heading are placeholders in the feed.</strong> Every ETS train
-              reports heading north at 90, so they are drawn as discs with no direction, and no
-              speed is shown for anything.
+              reports heading north at 90, so they are drawn as round, eight-sided pucks that point
+              nowhere, and no speed is shown for anything.
             </li>
             <li>
               <strong>An interchange appears once per line.</strong> The feed gives a station its

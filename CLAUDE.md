@@ -3,11 +3,18 @@
 A web app that shows Klang Valley trains (LRT, MRT, monorail, BRT Sunway) moving on a 3D map of
 Kuala Lumpur. Train positions are **calculated from Prasarana's published GTFS timetable**, because
 Rapid Rail has no live vehicle-position feed. Rapid KL buses and KTM ETS trains, which do have live
-GPS feeds, are drawn beside them at their reported positions (issue #40).
+GPS feeds, are drawn beside them: KTM ETS at its reported positions (issue #40), buses moved along
+their published routes between reports (issue #43).
 
-Honesty rule: the UI must always say which positions are scheduled (rail) and which are live GPS
-(buses, KTM ETS), and every live position says how old it is. Never invent, smooth over,
-or "fix" data silently. If the feed is wrong or missing, show that.
+Honesty rule: the UI must always say which positions are scheduled (rail), which are live GPS
+(KTM ETS, and any bus drawn at its report) and which are estimated (a bus moved between its live
+reports), and every live position says how old its real report is. Bus positions are estimated
+between live reports wherever an estimate is drawn, and say so there; KTM, and buses without a
+usable shape, are never estimated, and a bus not drawn at an estimate is never called estimated.
+This is the ONE relaxation of "never extrapolate", made by the owner for live buses only, and it is
+bounded by the `bus-estimation` spec: along the bus's own published shape, at a measured speed, for
+a stated time, never backwards. Beyond that, never invent, smooth over, or "fix" data silently. If
+the feed is wrong or missing, show that.
 
 ## About the owner
 
@@ -80,6 +87,8 @@ Conventions:
 - `npm test`  Vitest
 - `npm run build`  type-check (`tsc --noEmit`) then production build into `dist/`
 - `python scripts/build_network_json.py data/gtfs data/network.json`  rebuild the data file from the raw feed
+- `python scripts/build_bus_json.py FEED_DIR data`  rebuild `bus-routes.json`, `bus-shapes.json` and
+  `bus-stops.json` from an unzipped `rapid-bus-kl` static feed
 - `npm run check:feed`  check a rebuilt `network.json` against rules any valid feed must satisfy,
   and prove each check can fail. NOT the same job as `npm test`: see below.
 
@@ -89,8 +98,10 @@ Conventions:
 src/sim/   pure TypeScript. Timetable in, train positions out. No DOM, no map, no Date.now().
 src/map/   MapLibre + deck.gl. Owns the animation loop and the layers.
 src/live/  live buses and KTM. feed.ts is pure (decode, validate, merge, age); poll.ts fetches.
+           estimate.ts is pure (moves a bus along its shape between reports); busdata.ts fetches
+           and prepares the bus stops and route shapes.
 src/ui/    React components: clock, time controls, line list, train and station cards.
-data/      raw GTFS snapshot and the generated network.json (never edit network.json by hand)
+data/      raw GTFS snapshot and the generated network.json and bus-*.json (never edit them by hand)
 reference/ the working single-file prototype and golden test data. Read-only. Port from it, don't import it.
 ```
 
@@ -250,7 +261,7 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   "no train faster than 120 km/h" measured against the DRAWN position does exactly that: smoothstep
   peaks at 1.5x the average, so the fastest legitimate segment (89.9 km/h, PH SP24->SP25) renders as
   ~135 km/h. It is measured against the timetable instead. Headroom today is 30.1 km/h.
-- Every feed check is proven to fail: `check:feed` breaks the data eight ways on every run and asserts
+- Every feed check is proven to fail: `check:feed` breaks the data twenty ways (eight rail, twelve bus) on every run and asserts
   each specific check fires. The daily log carries that evidence.
 - Deployed as a Cloudflare Worker serving static assets. Two fixes keep the map drawing at all, one
   per build — see the MapLibre worker note in the stack section. `ls dist/assets | grep worker` must
@@ -283,13 +294,16 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 - Live buses and KTM (issue #40) done, and seen by the owner at midday. `src/live/feed.ts`
   is pure and scanned by `purity.test.ts`; `poll.ts` is the fetching half. Tested against four
   recorded responses in `src/live/fixtures/` (`*.pb` is `binary` in `.gitattributes`, and
-  `assetsInclude` lets Vite inline them for tests). Live vehicles are drawn where the feed last put
-  them and NEVER extrapolated or smoothed; they show only while the clock is live.
-- Each feed is requested at most once a minute, never within 30 s of the other, so two requests a
-  minute against a documented limit of 4 (GTFS Realtime, 429 beyond it). Polling every 30 s each
-  would sit exactly on the limit; the bus content only changes every ~60 s and KTM fixes every 120 s.
-  Polling stops while the tab is hidden, the clock is not live, or the mode is switched off. The
-  request times live in the module so a remount cannot fetch early.
+  `assetsInclude` lets Vite inline them for tests). KTM is drawn where the feed last put it and
+  NEVER extrapolated or smoothed; so is every bus until stage 4 of #43 (below) estimates it. Live
+  vehicles show only while the clock is live.
+- Polling (since stage 4 of #43): buses every 30 s, KTM every 120 s, never within 10 s of each
+  other (`POLL_MS`, `MIN_GAP_MS`), so 2.5 requests a minute and never more than 3 in any 60 s
+  against a documented limit of 4 (GTFS Realtime, 429 beyond it) - a test runs the poller's own loop
+  for ten minutes to hold it there. The bus feed changes only every 60 to 80 s, so 30 s polling
+  gets a report sooner, not fresher. Polling stops while the tab is hidden, the clock is not live,
+  or the mode is switched off. The request times live in the module so a remount cannot fetch
+  early; `untilNextMs` reads them for the card's countdown.
 - A fix is stale past 240 s (drawn faded and hollow) and gone past 600 s. Both from ONE midday
   sample; re-sample at a peak and late at night before trusting them. Ages are clamped at zero
   because the device clock can run behind the feed, and cannot be corrected: CORS hides `Date`.
@@ -300,15 +314,16 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   `decodeFeed` splits the message and decodes each entity alone, so that one is counted `missing`.
 - The KTMB feed carries only ETS intercity sets, no Komuter, so the mode is named
   "KTM ETS (intercity)" everywhere via `MODE_NAME`, and the data notes say Komuter may be running.
-  Its bearings (all 0) and speeds (all 90) are placeholders: KTM is drawn as a directionless disc.
+  Its bearings (all 0) and speeds (all 90) are placeholders: KTM is drawn as a directionless puck (stage 3 of #43).
   One sampled KTM train sat at 0.0027, 0.0155; positions within 0.1 degrees of 0,0 or outside
   Peninsular Malaysia are not drawn and are COUNTED in the panel's status line, never dropped
   silently. An empty KTM response (they alternate with full ones) keeps the held trains, ageing.
 - `IconLayer`'s `getAngle` turns ANTICLOCKWISE, so `angleFor(bearing)` is `360 - bearing` — read from
   the installed vertex shader, pinned by a test.
-- Bus routes are shown by feed id (`U3000`, not route 300). Public numbers need a lookup from static
-  GTFS, which is part of #43.
-- Live markers are small and FLAT: at the map's pitch a ground-lying icon is foreshortened to about
+- Bus routes are shown as "300 · feed id U3000", looked up in `data/bus-routes.json` by
+  `routeName` in `src/ui/inspect.ts`. An id the lookup lacks is "U9999 (feed id)" — never read off
+  its spelling: `T3048` is T304 and `S6060` is PAVILION BUKIT JALIL (PAVBJ).
+- The rail view's bus arrows are small and FLAT: at the map's pitch a ground-lying icon is foreshortened to about
   half its height, so they were first drawn at 4-9 px and nobody could find them. They are 10-18 px
   now, and coloured PER MAP VIEW (`LIVE_STYLE.color[view]`) - one dark slate vanished on the
   wireframe. The legend swatch follows the view through CSS variables, not React.
@@ -337,5 +352,99 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 - `src/rail.ts` prepares the network and derives places ONCE for the map and the panel. The
   station search is in the lines panel; matching ignores case, spaces, hyphens, apostrophes and
   accents, and choosing a result reuses `goToStation`.
-- Next: #43 (bus view), #26 (the journey planner), and #35, where rotating while following still
-  does not work on touch.
+- Bus view (issue #43), stage 1: the merged `interchange-places`, `live-buses-ktm` and
+  `station-labels` changes are archived, so `places`, `live-vehicles` and `station-labels` are in
+  `openspec/specs/`. `scripts/build_bus_json.py FEED_DIR OUT_DIR` builds three files from the
+  `rapid-bus-kl` static feed (URL needs the slash after `prasarana`, and redirects): route names
+  (bundled), shapes simplified to 5 m with each trip's route and shape (for stage 4's motion; the route so `check_feed` can prove it exists) and stops (for
+  stage 2). `src/bus.test.ts` pins this snapshot; `check_feed.py --bus` holds the rules for any
+  feed, each proved to fail, and the daily refresh rebuilds and commits all four data files
+  together. The Douglas-Peucker and the flat projection live in `scripts/geometry.py`, shared by
+  both scripts. The hover tip's age now advances while the pointer rests: the hovered vehicle is
+  kept in a ref and repainted on the quarter-second gate.
+- Bus view, stage 2 (#43): a Rail/Bus switch (`ViewSwitch`, a fieldset of two native radios under
+  the map style), held as `transitView` in `useView`, remembered in `localStorage` and put on
+  `<html>` as `data-transit-view`. Switching touches nothing else - no camera, clock, style,
+  selection, `hidden` or `liveOff` - and `store.test.ts` holds it to that. The bus view dims ALL of
+  rail (lines, stations, trains, names) to `BUS_VIEW_RAIL_OPACITY` and keeps it pickable, and draws
+  it FIRST so stops, buses and KTM sit over it; the rail view's order is unchanged.
+- Rail is dimmed with deck.gl's layer `opacity`, through `dimmer()` in `layers.ts`: a `clone` made
+  only when the source layer or the view changes. It must never hand back an instance it gave out
+  before - going back to full strength clones again, because deck.gl has already retired the
+  original in favour of the dimmed copy.
+- Bus stops come from `data/bus-stops.json` imported with `?url`, so Vite emits a hashed file
+  (`dist/assets/bus-stops-*.json`, 232 KB / 73 KB gzipped) and only its address is in the bundle.
+  `loadStops()` in `src/live/busdata.ts` fetches it once, the first time the bus view is shown; its
+  state (`idle | loading | ready | failed`) is `useLive().stops`, and the lines panel says loading
+  or unavailable in a polite status region. The layer is one `ScatterplotLayer`, gated by `visible`
+  (bus view, zoom 14 or closer) rather than left out of the list, pickable for a name-only hover,
+  and ignored by `pickToSelection`. The base map's own `poi_transit` bus stops are hidden in the bus
+  view through `layerOps` - visibility only, by layer id, since nothing else tells it apart.
+- Stage 2 not yet looked at: the switch by keyboard and at 360 px, rail dimmed but clickable, stops
+  from zoom 14, the base map's stops gone and back, no stops request until Bus is chosen, the live
+  group at phone width and by screen reader. `BUS_VIEW_RAIL_OPACITY` (0.4) and `LIVE_STYLE.stop`
+  are first guesses, to be tuned at that look (task 7.3).
+- Bus view, stage 3 (#43): two more models from `npm run models`, same palette texture, axes and
+  `W / MODEL_W` scale as the trains. `bus.gltf` is one rigid body, 9 x 3.4 x 3.4 m, its front (+X)
+  tapered and cab-shaded and its back square, drawn at street level in one neutral per map style -
+  so it cannot be taken for the articulated, elevated, line-coloured BRT Sunway. `ets.gltf` is an
+  octagonal puck 7 m across and 3 m tall, banded dark below and pale above, with yaw left at 0.
+  It is round ON PURPOSE: every elongated model has an axis, an axis on a map claims which way the
+  track runs, and KTM's bearings are placeholders with no published shapes to align to.
+  `models.test.ts` holds its X and Y extents equal. The train models came out byte-identical.
+- Which layer each view builds is `liveKind`: buses are models in the bus view and #40's arrows in
+  the rail view; ETS is a model in both, dimmed with rail in the bus view because it is a train.
+  Model layers have their OWN ids (`live-bus-model`, `live-ktm-model`): deck.gl matches layers by
+  id and would hand an IconLayer's state to a ScenegraphLayer. A model's `sizeScale` follows `W`
+  every frame through `clone`, which keeps data and accessors, so nothing is regenerated. A model
+  cannot be hollow, so stale is `alpha.stale` and the colour moved `model.staleGrey` towards mid
+  grey; a fresh model is opaque, because a translucent solid shows its own far side. A bus that
+  reported no bearing faces north, as its arrow always has.
+- Stage 3 not yet looked at: a live bus beside a BRT Sunway bus, ETS pucks pointing nowhere, stale
+  models reading as stale, in both views and both map styles. `LIVE_STYLE.model` is a first guess,
+  to be tuned at that look (task 8.4).
+- Bus view, stage 4 (#43): buses MOVE between reports, in both views, once the route shapes have
+  loaded. `src/live/estimate.ts` is pure and scanned by `purity.test.ts`: `onFix(track, fix,
+  shape)` takes a report in, `drawnAt(drawn, track, nowMs)` says where to draw this frame, in
+  metres along the shape, and `pointAt` (now typed on any `Path`, so a bus shape prepared by
+  `preparePath` works) turns that into lon, lat and bearing. The feed's own speed field is never used.
+- The estimation rules: a report is placed on its trip's published shape (every pass within 50 m;
+  on a round trip, the pass just ahead of the last place, or else the only one within 60 degrees of
+  the bus's bearing). Speed is along-shape distance between the bus's last two reports on the trip
+  over their time gap. The estimate is `place + speed x SPEED_FACTOR x min(elapsed, 150 s)`,
+  clamped to the shape's end. On a new report the drawn bus catches up FORWARD over 4 s if the
+  estimate is ahead, STANDS STILL if it is up to 250 m behind (and is moved back in one step if the
+  estimate stops short of it at its time limit), and is moved in one marked step if more than
+  250 m behind or on a new trip. It never glides backwards: `estimate.test.ts` tests that directly,
+  and `replay.test.ts` replays the 11 recorded bus responses at 60 frames a second and finds no
+  backward glide. A bus stays at its report on an unknown trip, over 50 m off its shape, on its
+  first report on a trip, on an undecidable round-trip pass, or at over 90 km/h.
+- The constants, all calibration rather than contract, each beside its measurement in
+  `estimate.ts`: `SPEED_FACTOR` 0.7 (0.5 was picked first for fewer pauses; the owner found it too laggy on
+  sight, so 0.7 trades more pauses for less lag; tune by eye), `PREDICT_S` 150,
+  `OFF_ROUTE_M` 50, `BEARING_TOL_DEG` 60, `HOLD_MAX_M` 250, `CATCH_UP_S` 4, `MAX_KMH` 90,
+  `NOISE_BACK_M` 60, `PASS_GAP_M` 300. `replay.test.ts` re-runs design.md's backtest on the
+  placement the app really uses and reproduces its 0.7 row (A: 138 m, 27%, 5%, lag 101 m; B:
+  129 m, 29%, 6%, 69 m). Judged when a response ARRIVES, corrections land ahead / holding /
+  jumping back 65 / 27 / 7% (A) and 63 / 27 / 10% (B), against design.md's expected 72 / 28 / 5-6.
+  At 0.5 they were 77 / 18 / 5% and 70 / 24 / 6%.
+- What loads when: route names in the bundle; `data/bus-shapes.json` (540 KB, 125 KB gzipped) as a
+  hashed `?url` asset fetched by `loadShapes()` on MapLibre's first `idle` after the overlay is
+  added, in either view, only while buses are on; stops on the first bus view. State is
+  `useLive().shapes`. Until the shapes are ready, and forever if they fail, every bus is exactly
+  where #40 drew it and nothing says estimated; a failure is said in the bus status line.
+- Per-bus tracks and drawn states live in the `liveLayers` closure, APART from the layer, so a view
+  switch rebuilds the layer and never moves a bus; both are forgotten with the layer when buses go
+  off or the clock leaves live. With shapes, the bus layer is rebuilt every frame like the trains'.
+- Wording follows what the map draws for THAT bus, never the view: an estimated bus's card says
+  "Position estimated", its real report's age, "Next update in N s", and "No newer report at the
+  last check" when the feed answered since with nothing newer (`mergeFixes` now stamps
+  `receivedMs`); its hover says "estimated · last GPS 45 s ago"; its route is drawn as a thin path.
+  A bus at its report says why and never "estimated". The status line counts buses on unknown
+  trips or off route. The caption, its summary label, the canvas label and the card's closing note
+  are PAINTED through refs (`paintCaption`, `cardNote`), because they depend on live state and
+  `store.test.ts` forbids any React subscription to `useLive`.
+- Stage 4 not yet looked at, and 12.1's 08:00 and 23:30 re-samples not yet done (they also re-run
+  the backtest and may move the constants). The final look must confirm what task 12.2 lists.
+- Next: #43 (close-out after the owner's look), #26 (the journey planner), and #35, where rotating
+  while following still does not work on touch.

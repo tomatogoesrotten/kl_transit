@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layerOps, stationNameFilters, WIREFRAME } from './modes'
+import { BASE_BUS_STOPS, layerOps, stationNameFilters, WIREFRAME } from './modes'
 import type { MapMode, StyleLayer } from './modes'
 
 // Abridged from liberty: one layer of each category the rules name, plus two
@@ -134,6 +134,33 @@ describe('layerOps', () => {
   })
 })
 
+describe('layerOps in the bus view', () => {
+  const withStops: StyleLayer[] = [
+    ...liberty,
+    { id: BASE_BUS_STOPS, type: 'symbol', 'source-layer': 'poi', paint: { 'text-color': '#666' } },
+  ]
+  const op = (mode: MapMode, view: 'rail' | 'bus', id: string) =>
+    layerOps(withStops, mode, view).find((l) => l.id === id)!
+
+  it("hides the base map's own bus stops in the bus view, in both map styles", () => {
+    expect(op('city', 'bus', BASE_BUS_STOPS).visibility).toBe('none')
+    expect(op('wireframe', 'bus', BASE_BUS_STOPS).visibility).toBe('none')
+  })
+
+  it('shows them again in the rail view exactly as before', () => {
+    expect(op('city', 'rail', BASE_BUS_STOPS)).toEqual(layerOps(withStops, 'city')[withStops.length - 1])
+    expect(op('city', 'rail', BASE_BUS_STOPS).visibility).toBe('visible')
+  })
+
+  it('changes nothing else: every other op is the rail view one', () => {
+    for (const mode of ['city', 'wireframe'] as const) {
+      const bus = layerOps(withStops, mode, 'bus').filter((l) => l.id !== BASE_BUS_STOPS)
+      const rail = layerOps(withStops, mode, 'rail').filter((l) => l.id !== BASE_BUS_STOPS)
+      expect(bus).toEqual(rail)
+    }
+  })
+})
+
 describe('stationNameFilters', () => {
   const rank = ['>=', ['get', 'rank'], 1]
   const transit = ['match', ['get', 'class'], ['airport', 'bus', 'rail'], true, false]
@@ -155,10 +182,12 @@ describe('stationNameFilters', () => {
     ])
   })
 
-  it('is never undone by a mode switch, because no mode op carries a filter', () => {
+  it('is never undone by a mode or view switch, because no op carries a filter', () => {
     for (const mode of ['city', 'wireframe'] as MapMode[]) {
-      for (const op of layerOps(layers, mode)) {
-        expect(Object.keys(op).sort()).toEqual(['id', 'paint', 'visibility'])
+      for (const view of ['rail', 'bus'] as const) {
+        for (const op of layerOps(layers, mode, view)) {
+          expect(Object.keys(op).sort()).toEqual(['id', 'paint', 'visibility'])
+        }
       }
     }
   })

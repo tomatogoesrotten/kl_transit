@@ -1,4 +1,19 @@
+import type { TransitView } from '../ui/store'
+
 export type MapMode = 'city' | 'wireframe'
+
+/**
+ * The base map's own bus stops: liberty's `poi_transit`, whose classes
+ * (`airport`, `bus`, `rail`) in Kuala Lumpur are bus stops - see
+ * `stationNameFilters`. Hidden in the bus view, which draws the published stops
+ * itself, so one stop is not marked twice from two sources.
+ *
+ * By id, unlike every rule in `wireframeRule`: no category tells this layer
+ * apart from the other POI symbol layers except its filter. If liberty renames
+ * it, the base map's bus stops simply stay in the bus view, which is visible and
+ * easy to diagnose rather than silent.
+ */
+export const BASE_BUS_STOPS = 'poi_transit'
 
 /**
  * The blueprint palette.
@@ -130,7 +145,7 @@ export function stationNameFilters(
 }
 
 /**
- * What to do to every style layer for a given mode.
+ * What to do to every style layer for a given mode and transit view.
  *
  * Pass the layers captured when the style loaded, not the live ones. The live
  * list contains deck.gl's own network layers, and carries whatever this function
@@ -146,10 +161,19 @@ export function stationNameFilters(
  * station buildings are left lit in both modes on purpose — see
  * our own added layers, which are not in the snapshot.
  */
-export function layerOps(layers: readonly StyleLayer[], mode: MapMode): LayerOp[] {
+export function layerOps(
+  layers: readonly StyleLayer[],
+  mode: MapMode,
+  view: TransitView = 'rail',
+): LayerOp[] {
   return layers.map((layer) => {
-    // `visible` unless the style itself shipped the layer switched off.
-    const original = layer.layout?.visibility === 'none' ? 'none' : 'visible'
+    // `visible` unless the style itself shipped the layer switched off, or it
+    // is the base map's bus stops in the bus view. Visibility only, never a
+    // filter, so the rail view gets them back exactly as they were.
+    const original =
+      layer.layout?.visibility === 'none' || (view === 'bus' && layer.id === BASE_BUS_STOPS)
+        ? 'none'
+        : 'visible'
     const rule = wireframeRule(layer)
 
     if (rule === null) return { id: layer.id, visibility: original, paint: {} }

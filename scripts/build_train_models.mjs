@@ -1,4 +1,5 @@
-// Builds one glTF 2.0 vehicle model per transit mode into src/map/models/.
+// Builds one glTF 2.0 vehicle model per transit mode, plus the live bus and
+// KTM ETS models, into src/map/models/.
 //
 //     npm run models
 //
@@ -239,8 +240,70 @@ function bus({ length, width, height }) {
   return m
 }
 
+/**
+ * A live Rapid KL bus: one rigid body, the front (+X) tapered and carrying the
+ * cab shade, the back square. Neutral in the app, never line-coloured, and
+ * drawn at street level, so it cannot be taken for the articulated, elevated
+ * BRT Sunway model above.
+ */
+function rigidBus({ length, width, height }) {
+  const m = mesh()
+  addCar(m, {
+    x0: -length / 2,
+    len: length,
+    hw: width / 2,
+    h: height,
+    taperA: false,
+    taperB: true,
+    capA: BODY,
+    capB: CAB,
+  })
+  return m
+}
+
+/**
+ * A KTM ETS marker: an octagonal puck, `across` metres between opposite flat
+ * faces in both X and Y. Directionless on purpose: the feed's ETS bearings are
+ * placeholders and KTMB publishes no shapes, so any elongated model would claim
+ * a heading we do not know. Eight-fold symmetric, so its yaw means nothing.
+ *
+ * Built from rings of eight side faces, each running from one radius at its
+ * bottom to another at its top, so the tucked base and the chamfered roof need
+ * no ledge faces. Dark below, pale above.
+ */
+function etsPuck({ across, height }) {
+  const m = mesh()
+  // Corners at 22.5 + 45k degrees put a flat face square to each axis, so the
+  // X and Y extents are both exactly `across`.
+  const rim = across / 2 / Math.cos(Math.PI / 8)
+  const corner = (k, r, z) => {
+    const a = Math.PI / 8 + (k * Math.PI) / 4
+    return [r * rim * Math.cos(a), r * rim * Math.sin(a), z * height]
+  }
+  const RINGS = [
+    // [z0, z1, radius at z0, radius at z1, shade], radius as a fraction of the rim
+    [0.0, 0.15, 0.86, 1.0, UNDER],
+    [0.15, 0.55, 1.0, 1.0, SKIRT],
+    [0.55, 0.85, 1.0, 1.0, BODY],
+    [0.85, 1.0, 1.0, 0.78, ROOF],
+  ]
+  for (const [z0, z1, r0, r1, shade] of RINGS) {
+    for (let k = 0; k < 8; k++) {
+      quad(m, corner(k, r0, z0), corner(k + 1, r0, z0), corner(k + 1, r1, z1), corner(k, r1, z1), shade)
+    }
+  }
+  // The two caps, each an octagon cut into three quads.
+  for (const [r, z, shade] of [[0.86, 0, UNDER], [0.78, 1, ROOF]]) {
+    const c = (k) => corner(k, r, z)
+    quad(m, c(0), c(1), c(2), c(3), shade)
+    quad(m, c(4), c(5), c(6), c(7), shade)
+    quad(m, c(0), c(3), c(4), c(7), shade)
+  }
+  return m
+}
+
 // --------------------------------------------------------------------------
-// The four modes
+// The four modes, and the two live vehicles
 //
 // Metres, at the size each is drawn when the camera is close. Every one is
 // shorter and wider than the real thing: a real four-car set is about 25 times
@@ -254,6 +317,10 @@ const MODELS = {
   mrt: () => train({ length: 22.4, width: 5.2, height: 4.0, cars: 4, gap: 0.36 }),
   mrl: () => monorail({ length: 12.0, width: 3.2, height: 3.6, cars: 2, gap: 0.28 }),
   brt: () => bus({ length: 10.4, width: 3.2, height: 3.2 }),
+  // Live vehicles (src/map/live.ts). The bus is shorter and wider than a real
+  // 12 m single-decker for the same reason the trains are.
+  bus: () => rigidBus({ length: 9.0, width: 3.4, height: 3.4 }),
+  ets: () => etsPuck({ across: 7.0, height: 3.0 }),
 }
 
 // --------------------------------------------------------------------------

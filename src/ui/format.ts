@@ -1,6 +1,6 @@
 import type { DayType, KlTime } from '../sim'
 import type { Rejected } from '../live/feed'
-import type { ClockMode, LiveStatus, Speed } from './store'
+import type { ClockMode, LiveStatus, LoadState, Speed, TransitView } from './store'
 
 const pad = (n: number) => String(Math.floor(n)).padStart(2, '0')
 
@@ -136,4 +136,86 @@ export function liveStatusLine(s: LiveStatus, shown: number, nowMs: number): str
   }[s.state]
   const bad = rejectLine(s.rejected)
   return bad ? `${line} ${bad}` : line
+}
+
+/**
+ * How buses are placed, in a phrase. Estimated only once the route shapes have
+ * loaded (`estimating`); before that every bus is at its live GPS report, and
+ * nothing may say estimated.
+ */
+const busPhrase = (estimating: boolean) =>
+  estimating
+    ? 'Rapid KL buses estimated between their live GPS reports, along their published routes'
+    : 'Rapid KL buses at their live GPS positions'
+
+/**
+ * The caption's sentence on the live kinds of position. Since #43 a bus is an
+ * estimate once the route shapes have loaded, and not before.
+ */
+export function liveSentence(estimating: boolean): string {
+  return estimating
+    ? 'KTM ETS trains are different: they are live GPS, drawn where each last reported itself. ' +
+        'Rapid KL buses are estimated: each is moved along its published route from its last live ' +
+        'GPS report, and corrected by the next. Both show how old their last report is, and ' +
+        'appear only while the clock is at the present moment.'
+    : 'Rapid KL buses and KTM ETS trains are different: they are live GPS, drawn where each last ' +
+        'reported itself, and each shows how old its position is. They appear only while the ' +
+        'clock is at the present moment.'
+}
+
+/** The caption's collapsed label: the view, and the honesty rule for every kind of position. */
+export function captionLabel(view: TransitView, estimating: boolean): string {
+  return (
+    `About KL Rail, ${view} view. Train positions are scheduled, not live. ` +
+    'KTM ETS positions are live GPS. ' +
+    (estimating ? 'Bus positions are estimated between live GPS reports.' : 'Bus positions are live GPS.')
+  )
+}
+
+/** What the chosen view puts in front, in one sentence, for the caption and the map's label. */
+export function viewSentence(view: TransitView, estimating: boolean): string {
+  return view === 'bus'
+    ? `Bus view: ${busPhrase(estimating)}, and from zoom 14 the bus stops ` +
+        'from the published bus timetable, with the rail network dimmed behind them.'
+    : 'Rail view: the rail network in front, with live buses drawn small beneath it.'
+}
+
+/** The canvas's `aria-label`: what the map is of, which kind of position is which, and how to move it. */
+export function mapLabel(view: TransitView, estimating: boolean): string {
+  return (
+    'Map of Klang Valley rail lines with trains placed by the timetable, KTM ETS trains at ' +
+    `their live GPS positions, and ${busPhrase(estimating)}, each showing how old its report is. ` +
+    `${viewSentence(view, estimating)} ` +
+    'Arrow keys move the view, plus and minus zoom. ' +
+    'Stations can be selected from the lines panel.'
+  )
+}
+
+/**
+ * What estimation is doing, appended to the bus status line. Empty until the
+ * route shapes are ready (nothing is estimated then, and nothing says so),
+ * except when they failed, which must be said.
+ *
+ * @param unestimated Buses drawn at their report because their trip is not in
+ *   the timetable, or they are off their route.
+ */
+export function motionLine(state: LoadState, unestimated: { noShape: number; offRoute: number }): string {
+  if (state === 'failed') {
+    return 'Estimated movement is unavailable: the route shapes could not be loaded, so buses stay at their last reports.'
+  }
+  if (state !== 'ready') return ''
+  const { noShape, offRoute } = unestimated
+  const parts = [
+    noShape ? `${noShape} on a trip the timetable does not have` : '',
+    offRoute ? `${offRoute} off ${offRoute === 1 ? 'its' : 'their'} route` : '',
+  ].filter(Boolean)
+  const at = parts.length ? ` ${noShape + offRoute} at their last report: ${parts.join(', ')}.` : ''
+  return `Positions estimated between reports, along each bus's route.${at}`
+}
+
+/** The bus stops' load state, said in the lines panel in the bus view. Empty when there is nothing to say. */
+export function stopsLine(state: LoadState): string {
+  if (state === 'loading') return 'Loading bus stops…'
+  if (state === 'failed') return 'Bus stops are unavailable: the stops file could not be loaded.'
+  return ''
 }

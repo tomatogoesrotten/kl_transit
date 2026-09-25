@@ -95,6 +95,8 @@
       say live vehicles are only shown at the present moment. State rejects when there are any, with
       the reason ("1 position unusable: reported at 0,0"), and nothing when there are none.
       Verify at phone width, and by keyboard.
+      Built and seen; only the phone-width and keyboard check is open. Moved to `bus-view` (#43)
+      task 7.2 when this change was archived.
 - [x] 5.5 Check each failure is stated, by blocking each feed's URL in the browser's developer tools
       and by the empty KTM responses that occur on their own: the panel says unavailable or empty,
       and held vehicles keep ageing rather than vanishing.
@@ -118,6 +120,7 @@
       change together). If a
       normally-reporting vehicle exceeds 240 s, or KTM bearings vary, update the constants and
       design.md in the same commit. Verify the numbers are recorded in the pull request.
+      Moved to `bus-view` (#43) task 12.1 when this change was archived.
 - [x] 7.2 Run `npm test`, `npm run build` and `npm audit`: all pass, 0 vulnerabilities. Report the
       bundle's growth from the decoder; if over about 60 KB gzipped, move it behind a dynamic
       `import()` per design.md and re-measure. Verify `ls dist/assets | grep worker` still lists the

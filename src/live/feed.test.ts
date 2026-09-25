@@ -10,11 +10,13 @@ import {
   dropGone,
   due,
   freshness,
+  LIVE_MODES,
   mergeFixes,
+  MIN_GAP_MS,
   POLL_MS,
-  STAGGER_MS,
+  untilDue,
 } from './feed'
-import type { Decoded, LiveVehicle } from './feed'
+import type { Decoded, LiveMode, LiveVehicle } from './feed'
 
 // Real responses, recorded 2026-09-25 around 12:10 KL and kept byte for byte.
 // Loaded as base64 through Vite rather than with node:fs, which this project
@@ -169,35 +171,48 @@ describe('a body that cannot be read', () => {
 })
 
 describe('mergeFixes', () => {
-  const held1 = mergeFixes(new Map(), bus1.vehicles)
-  const held2 = mergeFixes(held1, bus2.vehicles)
+  const R1 = 1_790_309_300_000
+  const R2 = R1 + 130_000
+  const held1 = mergeFixes(new Map(), bus1.vehicles, R1)
+  const held2 = mergeFixes(held1, bus2.vehicles, R2)
+  const as = (v: LiveVehicle, receivedMs: number) => ({ ...v, receivedMs })
 
   it('moves the vehicles that reported again, and keeps the ones that did not', () => {
     const again = bus2.vehicles.filter((v) => held1.has(v.id))
     const moved = again.filter((v) => v.fixSec > held1.get(v.id)!.fixSec)
     expect(moved.length).toBeGreaterThan(0)
-    for (const v of moved) expect(held2.get(v.id)).toBe(v)
+    for (const v of moved) expect(held2.get(v.id)).toEqual(as(v, R2))
     const silent = [...held1.keys()].filter((id) => !bus2.vehicles.some((v) => v.id === id))
     expect(silent.length).toBeGreaterThan(0)
     for (const id of silent) expect(held2.get(id)).toBe(held1.get(id))
   })
 
+  it('records when each report it takes in arrived, and keeps that time for a report it keeps', () => {
+    const v = bus1.vehicles[0]
+    expect(held1.get(v.id)?.receivedMs).toBe(R1)
+    // The decoder never sets it: only arriving here does.
+    expect(v.receivedMs).toBeUndefined()
+    const unchanged = [...held2.values()].filter((h) => h.receivedMs === R1)
+    expect(unchanged.length).toBeGreaterThan(0)
+    for (const h of unchanged) expect(h).toBe(held1.get(h.id))
+  })
+
   it('changes nothing when the older response arrives again', () => {
-    const again = mergeFixes(held2, bus1.vehicles)
+    const again = mergeFixes(held2, bus1.vehicles, R2 + 30_000)
     expect([...again.entries()]).toEqual([...held2.entries()])
     for (const [id, v] of again) expect(v).toBe(held2.get(id))
   })
 
   it('does not replace a report with one of the same age', () => {
-    const v = bus1.vehicles[0]
+    const v = held1.get(bus1.vehicles[0].id)!
     const twin: LiveVehicle = { ...v, position: [101, 3] }
-    expect(mergeFixes(held1, [twin]).get(v.id)).toBe(v)
+    expect(mergeFixes(held1, [twin], R2).get(v.id)).toBe(v)
   })
 
   it('leaves a vehicle where it was when its next report is at 0,0', () => {
     const at = { latitude: 3.1, longitude: 101.7 }
     const first = ok(decodeFeed(feedOf({ ...ETS, position: at }), 'ktm'))
-    const held = mergeFixes(new Map(), first.vehicles)
+    const held = mergeFixes(new Map(), first.vehicles, R1)
     const next = ok(
       decodeFeed(
         feedOf({ ...ETS, timestamp: ETS.timestamp + 120, position: { latitude: 0, longitude: 0 } }),
@@ -205,14 +220,14 @@ describe('mergeFixes', () => {
       ),
     )
     expect(next.rejected.nullIsland).toBe(1)
-    const after = mergeFixes(held, next.vehicles)
+    const after = mergeFixes(held, next.vehicles, R2)
     expect(after.get('9999')?.position).toEqual([expect.closeTo(101.7, 4), expect.closeTo(3.1, 4)])
     expect(after.get('9999')?.fixSec).toBe(ETS.timestamp)
   })
 
   it('does not touch the map it was given', () => {
     const before = new Map(held1)
-    mergeFixes(held1, bus2.vehicles)
+    mergeFixes(held1, bus2.vehicles, R2)
     expect(held1).toEqual(before)
   })
 })
@@ -236,7 +251,7 @@ describe('ageSec and freshness', () => {
   })
 
   it('dropGone removes only what is past ten minutes, and returns the same map when nothing goes', () => {
-    const held = mergeFixes(new Map(), bus1.vehicles)
+    const held = mergeFixes(new Map(), bus1.vehicles, 0)
     const newest = Math.max(...bus1.vehicles.map((v) => v.fixSec))
     expect(dropGone(held, newest * 1000)).toBe(held)
     expect(dropGone(held, (newest + 601) * 1000).size).toBe(0)
@@ -246,22 +261,72 @@ describe('ageSec and freshness', () => {
 describe('due', () => {
   const never = { bus: -Infinity, ktm: -Infinity }
 
-  it('asks for the bus feed first, and KTM 30 s after it', () => {
+  it('asks for the bus feed first, and KTM 10 s after it', () => {
     expect(due('bus', 0, never)).toBe(true)
     const last = { bus: 0, ktm: -Infinity }
-    expect(due('ktm', STAGGER_MS - 1, last)).toBe(false)
-    expect(due('ktm', STAGGER_MS, last)).toBe(true)
+    expect(due('ktm', MIN_GAP_MS - 1, last)).toBe(false)
+    expect(due('ktm', MIN_GAP_MS, last)).toBe(true)
   })
 
-  it('asks for each feed at most once a minute', () => {
-    const last = { bus: 0, ktm: STAGGER_MS }
-    expect(due('bus', POLL_MS - 1, last)).toBe(false)
-    expect(due('bus', POLL_MS, last)).toBe(true)
-    expect(due('ktm', STAGGER_MS + POLL_MS - 1, last)).toBe(false)
+  it('asks for buses at most every 30 s and KTM at most every 120 s', () => {
+    expect(POLL_MS).toEqual({ bus: 30_000, ktm: 120_000 })
+    const last = { bus: 0, ktm: MIN_GAP_MS }
+    expect(due('bus', POLL_MS.bus - 1, last)).toBe(false)
+    expect(due('bus', POLL_MS.bus, last)).toBe(true)
+    expect(due('ktm', MIN_GAP_MS + POLL_MS.ktm - 1, last)).toBe(false)
+    expect(due('ktm', MIN_GAP_MS + POLL_MS.ktm, { ...last, bus: 100_000 })).toBe(true)
   })
 
-  it('never asks within 30 s of the other feed, even after a long pause', () => {
+  it('never asks within 10 s of the other feed, even after a long pause', () => {
     const last = { bus: 0, ktm: 500_000 }
-    expect(due('bus', 500_000 + STAGGER_MS - 1, last)).toBe(false)
+    expect(due('bus', 500_000 + MIN_GAP_MS - 1, last)).toBe(false)
+    expect(due('bus', 500_000 + MIN_GAP_MS, last)).toBe(true)
+  })
+
+  /**
+   * The poller's own loop, as poll.ts runs it: a tick every 2 s, at most one
+   * request per tick, modes in LIVE_MODES order, each request instant.
+   */
+  function schedule(minutes: number, tickMs = 2_000, startMs = 0) {
+    const last = { bus: -Infinity, ktm: -Infinity }
+    const sent: { mode: LiveMode; at: number }[] = []
+    for (let now = startMs; now < startMs + minutes * 60_000; now += tickMs) {
+      const mode = LIVE_MODES.find((m) => due(m, now, last))
+      if (!mode) continue
+      last[mode] = now
+      sent.push({ mode, at: now })
+    }
+    return sent
+  }
+
+  /** The most requests in any 60 s window, counting (t - 60 s, t] as a rate limiter does. */
+  const busiestMinute = (sent: { at: number }[]) =>
+    Math.max(...sent.map(({ at }) => sent.filter((r) => r.at > at - 60_000 && r.at <= at).length))
+
+  it('makes about 20 bus and 5 KTM requests in ten minutes, never more than 3 in any 60 s', () => {
+    const sent = schedule(10)
+    expect(sent.filter((r) => r.mode === 'bus')).toHaveLength(20)
+    expect(sent.filter((r) => r.mode === 'ktm')).toHaveLength(5)
+    expect(busiestMinute(sent)).toBe(3)
+    // And the two never land within 10 s of each other.
+    for (let i = 1; i < sent.length; i++) {
+      if (sent[i].mode !== sent[i - 1].mode) expect(sent[i].at - sent[i - 1].at).toBeGreaterThanOrEqual(MIN_GAP_MS)
+    }
+  })
+
+  it('holds to 3 in any 60 s whatever the tick and wherever it starts', () => {
+    for (const tick of [1_000, 1_700, 2_000, 2_300, 3_100]) {
+      for (const start of [0, 999, 12_345]) expect(busiestMinute(schedule(10, tick, start))).toBeLessThanOrEqual(3)
+    }
+  })
+})
+
+describe('untilDue', () => {
+  it('counts down to the next request, and is 0 when due or never asked', () => {
+    const last = { bus: 1_000, ktm: -Infinity }
+    expect(untilDue('bus', 1_000, last)).toBe(30_000)
+    expect(untilDue('bus', 19_000, last)).toBe(12_000)
+    expect(untilDue('bus', 40_000, last)).toBe(0)
+    expect(untilDue('ktm', 5_000, last)).toBe(0)
   })
 })

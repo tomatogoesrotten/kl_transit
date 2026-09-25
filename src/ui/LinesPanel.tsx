@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { PLACES } from '../rail'
 import { network } from '../sim'
@@ -46,6 +46,9 @@ export function LinesPanel() {
   // frame loop reads it.
   const [query, setQuery] = useState('')
   const found = findPlaces(PLACES, query)
+  // For tying each live switch to its status line, so a screen reader reads the
+  // status when the switch is focused.
+  const ids = useId()
 
   useEffect(() => {
     return () => {
@@ -54,6 +57,7 @@ export function LinesPanel() {
       panels.liveCounts.clear()
       panels.liveStatus.clear()
       panels.liveNote = null
+      panels.stopsStatus = null
     }
   }, [])
 
@@ -203,6 +207,9 @@ export function LinesPanel() {
                 checked={!liveOff.has(mode)}
                 onChange={() => toggleLive(mode)}
                 aria-label={`Show ${MODE_NAME[mode]}`}
+                // The status line below, read out after the switch's name. It
+                // is empty whenever it is hidden, so a hidden one adds nothing.
+                aria-describedby={`${ids}-${mode}-status`}
               />
               {/* The legend: the colour this mode is drawn in. */}
               <span
@@ -227,6 +234,7 @@ export function LinesPanel() {
               />
             </label>
             <p
+              id={`${ids}-${mode}-status`}
               className="live-status"
               hidden
               ref={(el) => {
@@ -237,6 +245,16 @@ export function LinesPanel() {
           </li>
         ))}
       </ul>
+      {/* The bus stops' download, said only in the bus view and only while it is
+          not simply done. A polite status region: it changes at most twice a
+          visit, and "unavailable" is worth hearing. Written by the frame loop. */}
+      <p
+        className="live-status stops-status"
+        role="status"
+        ref={(el) => {
+          panels.stopsStatus = el
+        }}
+      />
     </details>
   )
 }
