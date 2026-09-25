@@ -250,7 +250,7 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   "no train faster than 120 km/h" measured against the DRAWN position does exactly that: smoothstep
   peaks at 1.5x the average, so the fastest legitimate segment (89.9 km/h, PH SP24->SP25) renders as
   ~135 km/h. It is measured against the timetable instead. Headroom today is 30.1 km/h.
-- Every feed check is proven to fail: `check:feed` breaks the data nineteen ways (eight rail, eleven bus) on every run and asserts
+- Every feed check is proven to fail: `check:feed` breaks the data twenty ways (eight rail, twelve bus) on every run and asserts
   each specific check fires. The daily log carries that evidence.
 - Deployed as a Cloudflare Worker serving static assets. Two fixes keep the map drawing at all, one
   per build — see the MapLibre worker note in the stack section. `ls dist/assets | grep worker` must
@@ -342,7 +342,7 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   `station-labels` changes are archived, so `places`, `live-vehicles` and `station-labels` are in
   `openspec/specs/`. `scripts/build_bus_json.py FEED_DIR OUT_DIR` builds three files from the
   `rapid-bus-kl` static feed (URL needs the slash after `prasarana`, and redirects): route names
-  (bundled), shapes simplified to 5 m with trip-to-shape (for stage 4's motion) and stops (for
+  (bundled), shapes simplified to 5 m with each trip's route and shape (for stage 4's motion; the route so `check_feed` can prove it exists) and stops (for
   stage 2). `src/bus.test.ts` pins this snapshot; `check_feed.py --bus` holds the rules for any
   feed, each proved to fail, and the daily refresh rebuilds and commits all four data files
   together. The Douglas-Peucker and the flat projection live in `scripts/geometry.py`, shared by

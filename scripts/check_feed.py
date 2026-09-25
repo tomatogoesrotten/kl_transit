@@ -230,9 +230,11 @@ def check_bus(bus, old=None):
                 break                                   # one per shape is enough to refuse it
 
     # --- trips that lead nowhere ----------------------------------------------
-    for tid, sid in trips.items():
+    for tid, (rid, sid) in trips.items():
+        if rid not in routes:
+            fail.append(f'bus-trip-route: trip {tid} names route {rid}, which is not in the data')
         if sid not in shapes:
-            fail.append(f'bus-trip: trip {tid} names shape {sid}, which is not in the data')
+            fail.append(f'bus-trip-shape: trip {tid} names shape {sid}, which is not in the data')
 
     return fail, note
 
@@ -309,6 +311,10 @@ def first_shape(bus):
     return next(iter(bus['shapes']['shapes'].values()))
 
 
+def first_trip(bus):
+    return next(iter(bus['shapes']['trips'].values()))
+
+
 def truncate_routes(bus):
     keep = list(bus['routes'])[:(len(bus['routes']) - 1) // 2]
     bus['routes'] = {k: bus['routes'][k] for k in keep}
@@ -339,9 +345,10 @@ CASES_BUS = [
     ('a shape point moved to Borneo', lambda b: first_shape(b).__setitem__(-1, [110.0, 3.0]),
      'bus-shape-outside:'),
     ('a shape cut to one point', lambda b: first_shape(b).__delitem__(slice(1, None)), 'bus-shape-points:'),
-    ("a trip's shape pointed at nothing",
-     lambda b: b['shapes']['trips'].__setitem__(next(iter(b['shapes']['trips'])), 'NO-SUCH-SHAPE'),
-     'bus-trip:'),
+    ("a trip's route pointed at nothing", lambda b: first_trip(b).__setitem__(0, 'NO-SUCH-ROUTE'),
+     'bus-trip-route:'),
+    ("a trip's shape pointed at nothing", lambda b: first_trip(b).__setitem__(1, 'NO-SUCH-SHAPE'),
+     'bus-trip-shape:'),
 ]
 
 

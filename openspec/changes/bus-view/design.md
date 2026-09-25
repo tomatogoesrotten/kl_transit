@@ -116,7 +116,7 @@ are real in this feed), writes:
 | File | Holds | Size (raw / gzipped) | Loaded |
 |---|---|---|---|
 | `data/bus-routes.json` | route id to `[short name, long name]` | about 10 KB | in the main bundle: route names show on every bus hover, in both views, from the first fix |
-| `data/bus-shapes.json` | `origin` (the same projection as `network.json`), shapes simplified with the rail script's Douglas-Peucker at 5 m and rounded to 5 decimal places, trip id to shape id | about 515 KB / 126 KB | in the background after the map first goes idle, in both views, while buses are on |
+| `data/bus-shapes.json` | `origin` (the same projection as `network.json`), shapes simplified with the rail script's Douglas-Peucker at 5 m and rounded to 5 decimal places, trip id to `[route id, shape id]` | about 540 KB / 123 KB | in the background after the map first goes idle, in both views, while buses are on |
 | `data/bus-stops.json` | stops as `[id, name, lon, lat]` | about 232 KB / 73 KB | on first entry to the bus view |
 
 Why split shapes from stops rather than one file: they are needed at different times. Motion runs in
@@ -133,7 +133,11 @@ roughly halve the file later if it matters on phones; not now.
 Stop names are kept as published (ALL CAPS). The rail script's prettifier exists, but its keep-list is
 tuned to station names; applying it to 4,000 street names would get some wrong silently.
 
-The trip-to-shape table is shipped rather than parsed out of the trip id. Every current trip id does
+Each trip carries its route id as well as its shape id. The app moves buses by shape only; the route
+is there so that `check_feed.py` can prove every trip's route exists (a rule in the data-freshness
+spec that a trip-to-shape table alone could not check). It costs about 21 KB raw and 0.5 KB gzipped.
+
+The trip table is shipped rather than parsed out of the trip id. Every current trip id does
 spell its route and shape (`weekday_U6000_U600001_9`), but that is a convention nobody promised, and
 parsing it would be guessing.
 

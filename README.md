@@ -71,7 +71,7 @@ correct timetable satisfies: no line missing its departures, trains running at t
 nothing running at three in the morning, no timetabled journey faster than 120 km/h. That is what
 the daily refresh runs, because it has to pass on a timetable nobody has looked at yet.
 
-It also breaks the data on purpose, eight ways for the rail timetable and eleven for the bus data,
+It also breaks the data on purpose, eight ways for the rail timetable and twelve for the bus data,
 and prints whether each check noticed. A check nobody
 has seen fail is not a check.
 

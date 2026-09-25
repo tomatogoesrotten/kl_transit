@@ -27,7 +27,7 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 - [x] 2.1 Write `scripts/build_bus_json.py FEED_DIR OUT_DIR` with pandas, writing
       `data/bus-routes.json` (route id to `[short name, long name]`), `data/bus-shapes.json` (`origin`
       copied from `network.json`'s projection constants, shapes simplified with the rail script's
-      Douglas-Peucker at 5 m and rounded to 5 decimals, trip id to shape id) and `data/bus-stops.json`
+      Douglas-Peucker at 5 m and rounded to 5 decimals, trip id to `[route id, shape id]`, the route so the checks can verify it exists) and `data/bus-stops.json`
       (`[id, name, lon, lat]` to 5 decimals). Read CSVs with pandas so quoted commas parse. Verify by
       running it on the feed from `https://api.data.gov.my/gtfs-static/prasarana/?category=rapid-bus-kl`
       (follow redirects): 137 routes, 4,053 stops, 171 shapes, 2,097 trips; shapes near 515 KB raw and
@@ -39,12 +39,12 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 3. Stage 1: checks and the daily refresh
 
-- [ ] 3.1 Add `check_bus` to `scripts/check_feed.py` with the rules in the data-freshness spec (under
+- [x] 3.1 Add `check_bus` to `scripts/check_feed.py` with the rules in the data-freshness spec (under
       half the stored routes or stops; stop or shape point missing, near 0,0 or outside the box; a
       route with no short name; a trip whose route or shape is missing; a shape under two points),
       naming no measured value, and `--bus DIR [--against-bus DIR]`. Verify
       `python scripts/check_feed.py data/network.json --bus data --self-test` passes.
-- [ ] 3.2 Add one break-it case per bus rule to the self-test, each asserting its own check fires.
+- [x] 3.2 Add one break-it case per bus rule to the self-test, each asserting its own check fires.
       Verify the log prints "caught" for every bus case, and that deleting any one rule makes the
       self-test fail.
 - [ ] 3.3 Update `npm run check:feed` to include the bus arguments, and the workflow to download the

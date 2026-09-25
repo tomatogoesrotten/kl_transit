@@ -5,7 +5,9 @@ GTFS (Prasarana rapid-bus-kl)  ->  the three bus data files the app loads.
 
 Writes, into OUT_DIR:
   bus-routes.json  route id -> [short name, long name]. Small; bundled, so route numbers show at once.
-  bus-shapes.json  the flat projection, every route shape simplified to 5 m, and trip id -> shape id.
+  bus-shapes.json  the flat projection, every route shape simplified to 5 m, and
+                   trip id -> [route id, shape id]. The route rides along so check_feed.py can
+                   prove every trip's route exists; the app itself moves buses by shape.
                    Fetched after the map has drawn; buses are moved along these (issue #43).
   bus-stops.json   [[stop id, name, lon, lat], ...]. Fetched only when the bus view is first opened.
 
@@ -13,7 +15,7 @@ Every column is read as text: stop ids look like numbers but are identifiers, an
 short name is "300" must stay the string "300". Names are kept as published (ALL CAPS); the rail
 script's prettifier is tuned to station names and would get street names wrong silently.
 
-The trip-to-shape table is shipped rather than parsed out of the trip id. Today's ids spell their
+The trip table is shipped rather than parsed out of the trip id. Today's ids spell their
 shape (`weekday_U6000_U600001_9`), but nobody promised that.
 """
 import json
@@ -58,7 +60,7 @@ def main(feed, out_dir):
         ll = pts[['shape_pt_lon', 'shape_pt_lat']].astype(float).values
         raw_points += len(ll)
         simplified[sid] = simplify(ll)
-    trip_shape = {t.trip_id: t.shape_id for t in trips.itertuples()}
+    trip_shape = {t.trip_id: [t.route_id, t.shape_id] for t in trips.itertuples()}
     shape_file = {'origin': {'lat': LAT0, 'lon': LON0, 'kx': KX, 'ky': KY},
                   'generated_from': 'Prasarana GTFS static, category=rapid-bus-kl',
                   'shapes': simplified, 'trips': trip_shape}

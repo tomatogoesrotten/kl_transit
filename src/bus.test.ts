@@ -9,7 +9,8 @@ import { BOX } from './live/feed'
 // these red, for a person to look at and update. The rules any valid bus feed
 // satisfies are in scripts/check_feed.py, which the refresh runs instead.
 const byRoute = routes as Record<string, string[]>
-const shapeOf = shapes.trips as Record<string, string>
+// trip id -> [route id, shape id]
+const tripTable = shapes.trips as Record<string, string[]>
 const shapeById = shapes.shapes as Record<string, number[][]>
 
 describe('bus data', () => {
@@ -17,7 +18,7 @@ describe('bus data', () => {
     expect(Object.keys(byRoute).length).toBe(137)
     expect(stops.length).toBe(4053)
     expect(Object.keys(shapeById).length).toBe(171)
-    expect(Object.keys(shapeOf).length).toBe(2097)
+    expect(Object.keys(tripTable).length).toBe(2097)
   })
 
   it('names routes as the public knows them', () => {
@@ -39,10 +40,12 @@ describe('bus data', () => {
     }
   })
 
-  it("gives every trip a shape of at least two points", () => {
-    for (const [trip, shape] of Object.entries(shapeOf)) {
+  it('gives every trip a known route and a shape of at least two points', () => {
+    for (const [trip, [route, shape]] of Object.entries(tripTable)) {
+      expect(byRoute[route], trip).toBeDefined()
       expect(shapeById[shape]?.length ?? 0, trip).toBeGreaterThanOrEqual(2)
     }
+    expect(tripTable.weekday_U6000_U600001_9).toEqual(['U6000', 'U600001'])
   })
 
   it('uses the same flat projection as network.json', async () => {

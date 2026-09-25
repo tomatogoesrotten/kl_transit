@@ -131,7 +131,7 @@ and shape direction differ by a median of 3.3 degrees.
 - **New code**: `src/live/estimate.ts` (pure, scanned by `purity.test.ts`) and its tests;
   `src/live/busdata.ts` (loads and prepares the bus data); `scripts/build_bus_json.py`.
 - **New data**, all generated and never edited by hand: `data/bus-routes.json` (route id to public
-  name, about 10 KB, bundled); `data/bus-shapes.json` (origin, shapes simplified to 5 m, trip-to-shape
+  name, about 10 KB, bundled); `data/bus-shapes.json` (origin, shapes simplified to 5 m, trip to route and shape
   table: about 515 KB raw, 126 KB gzipped, fetched in the background after first paint, in both views);
   `data/bus-stops.json` (about 232 KB raw, 73 KB gzipped, fetched on first entry to the bus view).
 - **Modified**: `src/live/feed.ts` (polling intervals), `src/live/poll.ts` (next-request time readable
