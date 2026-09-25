@@ -69,7 +69,7 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 5. Stage 2: the view switch and rail dimming
 
-- [ ] 5.1 Add `transitView: 'rail' | 'bus'` and `setTransitView` to `useView`, persisted in
+- [x] 5.1 Add `transitView: 'rail' | 'bus'` and `setTransitView` to `useView`, persisted in
       `localStorage` with try/catch like the map style, and written to
       `document.documentElement.dataset.transitView`. Verify with `store.test.ts`: defaults to rail,
       and switching changes no clock, camera, style, `hidden` or `liveOff` state.
@@ -80,7 +80,7 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       with `opacity: BUS_VIEW_RAIL_OPACITY` when it changes (as for `hidden`), pass it to the train
       layers, and order layers per design.md. Verify rail stays clickable in the bus view, and that
       React DevTools' profiler shows no renders per frame while switching.
-- [ ] 5.4 Hide the base map's `poi_transit` layer in the bus view through `layerOps` (visibility
+- [x] 5.4 Hide the base map's `poi_transit` layer in the bus view through `layerOps` (visibility
       only). Verify `modes.test.ts` still passes its "paint and visibility only" test and a new case
       for the bus view.
 
@@ -92,14 +92,14 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       the stops file is made until Bus is chosen.
 - [ ] 6.2 Paint the stops' load state in the lines panel's live group ("Loading bus stops…", "Bus stops
       are unavailable"). Verify by blocking the file's URL in developer tools.
-- [ ] 6.3 Draw stops as one `ScatterplotLayer`, built once when the data arrives, `visible` only in
+- [x] 6.3 Draw stops as one `ScatterplotLayer`, built once when the data arrives, `visible` only in
       the bus view at zoom 14 or closer, colours per map style in `LIVE_STYLE`, pickable for a hover
       that shows the stop's name, and ignored by `pickToSelection`. Verify with a test of the zoom and
       view gate.
 
 ## 7. Stage 2: the panel, and the stage's look
 
-- [ ] 7.1 Make the caption in `App.tsx` and the canvas `aria-label` name the views correctly (buses are
+- [x] 7.1 Make the caption in `App.tsx` and the canvas `aria-label` name the views correctly (buses are
       still live GPS at this stage). Verify by reading both views' text.
 - [ ] 7.2 Carried from #40: the lines panel's live group at 360 px width and by keyboard and screen
       reader. Verify every switch, count and status line is reachable, readable and announced, with no

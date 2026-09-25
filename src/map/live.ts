@@ -1,7 +1,8 @@
-import { IconLayer } from '@deck.gl/layers'
+import { IconLayer, ScatterplotLayer } from '@deck.gl/layers'
 import { freshness, LIVE_MODES } from '../live/feed'
 import type { LiveMode, LiveVehicle } from '../live/feed'
-import type { LiveStore } from '../ui/store'
+import type { BusStop } from '../live/busdata'
+import type { LiveFeeds, TransitView } from '../ui/store'
 import type { Interleaved } from './layers'
 import type { MapMode } from './modes'
 
@@ -34,7 +35,33 @@ export const LIVE_STYLE = {
   } as Record<LiveMode, [far: number, near: number]>,
   /** Alpha for a current report, and for a stale one, which is also drawn hollow. */
   alpha: { fresh: 240, stale: 150 },
+  /**
+   * Bus stops, bus view only: a small dot in the buses' own colour with an
+   * outline that contrasts with the ground, so a stop reads as "bus" and stands
+   * off both the pale city and the dark wireframe. Tuned by eye (task 7.3).
+   */
+  stop: {
+    city: { fill: [62, 78, 96], line: [255, 255, 255] },
+    wireframe: { fill: [206, 218, 232], line: [6, 10, 18] },
+  } as Record<MapMode, { fill: Rgb; line: Rgb }>,
+  /** A stop's radius and outline, in pixels. */
+  stopPx: { radius: 3.5, line: 1.5 },
 } as const
+
+/**
+ * How strongly the rail network (lines, stations, trains, names) is drawn in
+ * the bus view: dimmed so buses and stops read first, never hidden, because
+ * interchanges are the point. Taste, tuned by eye in both map styles (task 7.3).
+ */
+export const BUS_VIEW_RAIL_OPACITY = 0.4
+
+/** The zoom from which bus stops are drawn: farther out, 4,053 of them would be a smear. */
+export const STOP_MIN_ZOOM = 14
+
+/** Whether bus stops are drawn: in the bus view, at `STOP_MIN_ZOOM` or closer. */
+export function stopsShown(view: TransitView, zoom: number): boolean {
+  return view === 'bus' && zoom >= STOP_MIN_ZOOM
+}
 
 const FAR_ZOOM = 10
 const NEAR_ZOOM = 15
@@ -164,7 +191,7 @@ type Built = { key: string; band: number; view: MapMode; checked: number; layer:
  */
 export function liveLayers(beforeId: string) {
   const built: Partial<Record<LiveMode, Built>> = {}
-  return (feeds: LiveStore, off: ReadonlySet<LiveMode>, nowMs: number, zoom: number, view: MapMode) => {
+  return (feeds: LiveFeeds, off: ReadonlySet<LiveMode>, nowMs: number, zoom: number, view: MapMode) => {
     const out: IconLayer<LiveItem, Interleaved>[] = []
     for (const mode of LIVE_MODES) {
       if (off.has(mode)) {
@@ -199,5 +226,57 @@ export function liveLayers(beforeId: string) {
       out.push(layer)
     }
     return out
+  }
+}
+
+const stopPosition = (d: BusStop): [number, number] => [d[2], d[3]]
+
+/**
+ * The bus stops layer, or null before the stops have arrived.
+ *
+ * Built when the data arrives, and again only when the map style changes or the
+ * stops cross the zoom-and-view gate. That gate is the layer's `visible`, not
+ * leaving it out of the list: deck.gl finalizes a layer the moment it leaves,
+ * and the rebuild for a flip shares the data and accessors, so nothing is
+ * regenerated. Every other frame gets the same instance back.
+ *
+ * Pickable for the hover, which says the stop's name. A click on a stop selects
+ * nothing: there is nothing honest to put in a card for one yet.
+ */
+export function busStopLayers(beforeId: string) {
+  let built: {
+    stops: readonly BusStop[]
+    style: MapMode
+    shown: boolean
+    layer: ScatterplotLayer<BusStop, Interleaved>
+  } | null = null
+  return (stops: readonly BusStop[] | null, style: MapMode, view: TransitView, zoom: number) => {
+    if (!stops) return null
+    const shown = stopsShown(view, zoom)
+    if (!built || built.stops !== stops || built.style !== style || built.shown !== shown) {
+      const { fill, line } = LIVE_STYLE.stop[style]
+      built = {
+        stops,
+        style,
+        shown,
+        layer: new ScatterplotLayer<BusStop, Interleaved>({
+          id: 'bus-stops',
+          data: stops,
+          beforeId,
+          visible: shown,
+          pickable: true,
+          getPosition: stopPosition,
+          radiusUnits: 'pixels',
+          getRadius: LIVE_STYLE.stopPx.radius,
+          filled: true,
+          getFillColor: fill,
+          stroked: true,
+          lineWidthUnits: 'pixels',
+          getLineWidth: LIVE_STYLE.stopPx.line,
+          getLineColor: line,
+        }),
+      }
+    }
+    return built.layer
   }
 }

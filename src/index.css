@@ -103,7 +103,7 @@ body { font: 14px/1.4 system-ui, sans-serif; background: var(--void); color: var
    and cut. `.tip` and `.guide` are NOT in it: the tip moves with the pointer,
    which is the worst case of all, and the guide is a full-screen modal. Both
    use `--solid` instead. */
-.caption, .mode-switch, .timebar, .lines, .card, .following, .chooser {
+.caption, .mode-switch, .view-switch, .timebar, .lines, .card, .following, .chooser {
   background: var(--glass);
   border: 1px solid var(--edge);
   -webkit-backdrop-filter: var(--blur);
@@ -191,6 +191,24 @@ body { font: 14px/1.4 system-ui, sans-serif; background: var(--void); color: var
 }
 .mode-switch input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--fg); }
 .mode-switch input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Rail or Bus, directly under the map style: both say what the map is of.
+   A fieldset keeps its native group semantics; only its default border, margin
+   and the legend's notch are undone. The legend floats so it sits in the row
+   like any other text instead of on the border. `top` leaves the mode switch
+   (110px + about 38px) its room. */
+.view-switch {
+  position: absolute; right: 10px; top: 156px; z-index: 1;
+  margin: 0; padding: 8px 12px; border-radius: 8px;
+  font-size: 13px; user-select: none;
+}
+.view-switch legend {
+  float: left; padding: 0; margin-right: 10px; color: var(--fg-dim);
+}
+.view-switch label { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; cursor: pointer; }
+.view-switch label:first-of-type { margin-left: 0; }
+.view-switch input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--fg); }
+.view-switch input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* Top centre, and above everything: the bottom belongs to the time bar now, and
    this one fires when the network cannot be drawn at all — it should not end up
@@ -356,6 +374,9 @@ select.btn { padding: 7px 8px; }
 .swatch-live { background: var(--live-city); }
 :root[data-map-mode="wireframe"] .swatch-live { background: var(--live-wireframe); }
 .live-status { margin: 0 6px 4px 30px; font-size: 12px; color: var(--fg-dim); }
+/* Always in the document, because it is a live region; collapsed while empty. */
+.stops-status { margin: 0 14px 8px; }
+.stops-status:empty { margin: 0; }
 .pill {
   display: inline-block; min-width: 46px; padding: 3px 5px; border-radius: 4px;
   text-align: center; font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
@@ -521,8 +542,8 @@ select.btn { padding: 7px 8px; }
    under the mode switch, which is itself under MapLibre's navigation control. */
 @media (min-width: 761px) {
   .card {
-    position: fixed; right: 10px; top: 160px; z-index: 1;
-    width: 320px; max-height: calc(100vh - 210px);
+    position: fixed; right: 10px; top: 204px; z-index: 1;
+    width: 320px; max-height: calc(100vh - 254px);
   }
 }
 

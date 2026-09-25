@@ -348,5 +348,27 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   together. The Douglas-Peucker and the flat projection live in `scripts/geometry.py`, shared by
   both scripts. The hover tip's age now advances while the pointer rests: the hovered vehicle is
   kept in a ref and repainted on the quarter-second gate.
-- Next: #43 (bus view, stages 2 to 4), #26 (the journey planner), and #35, where rotating while following still
-  does not work on touch.
+- Bus view, stage 2 (#43): a Rail/Bus switch (`ViewSwitch`, a fieldset of two native radios under
+  the map style), held as `transitView` in `useView`, remembered in `localStorage` and put on
+  `<html>` as `data-transit-view`. Switching touches nothing else - no camera, clock, style,
+  selection, `hidden` or `liveOff` - and `store.test.ts` holds it to that. The bus view dims ALL of
+  rail (lines, stations, trains, names) to `BUS_VIEW_RAIL_OPACITY` and keeps it pickable, and draws
+  it FIRST so stops, buses and KTM sit over it; the rail view's order is unchanged.
+- Rail is dimmed with deck.gl's layer `opacity`, through `dimmer()` in `layers.ts`: a `clone` made
+  only when the source layer or the view changes. It must never hand back an instance it gave out
+  before - going back to full strength clones again, because deck.gl has already retired the
+  original in favour of the dimmed copy.
+- Bus stops come from `data/bus-stops.json` imported with `?url`, so Vite emits a hashed file
+  (`dist/assets/bus-stops-*.json`, 232 KB / 73 KB gzipped) and only its address is in the bundle.
+  `loadStops()` in `src/live/busdata.ts` fetches it once, the first time the bus view is shown; its
+  state (`idle | loading | ready | failed`) is `useLive().stops`, and the lines panel says loading
+  or unavailable in a polite status region. The layer is one `ScatterplotLayer`, gated by `visible`
+  (bus view, zoom 14 or closer) rather than left out of the list, pickable for a name-only hover,
+  and ignored by `pickToSelection`. The base map's own `poi_transit` bus stops are hidden in the bus
+  view through `layerOps` - visibility only, by layer id, since nothing else tells it apart.
+- Stage 2 not yet looked at: the switch by keyboard and at 360 px, rail dimmed but clickable, stops
+  from zoom 14, the base map's stops gone and back, no stops request until Bus is chosen, the live
+  group at phone width and by screen reader. `BUS_VIEW_RAIL_OPACITY` (0.4) and `LIVE_STYLE.stop`
+  are first guesses, to be tuned at that look (task 7.3).
+- Next: #43 (bus view, stages 3 and 4), #26 (the journey planner), and #35, where rotating while
+  following still does not work on touch.

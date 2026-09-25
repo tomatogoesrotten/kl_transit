@@ -4,6 +4,7 @@ import type { PreparedLine } from '../sim'
 import {
   stationRadius,
   cameraLayers,
+  dimmer,
   hexToRgb,
   labelLayerId,
   lineLayer,
@@ -331,5 +332,51 @@ describe('station markers grow as the camera pulls back', () => {
     for (const z of [8, 10, 12.5, 15, 17]) {
       expect(stationRadius(z), `at zoom ${z}`).toBeGreaterThan(stationRadius(z) / 2.5)
     }
+  })
+})
+
+describe('dimmer, the bus view dimming rail', () => {
+  const lines = () => lineLayer(rail, corridors, 'test-label-layer')
+
+  it('hands back the layer itself at full strength, and the same instance while nothing changes', () => {
+    const dim = dimmer()
+    const src = lines()
+    expect(dim(src, 1)).toBe(src)
+    expect(dim(src, 1)).toBe(src)
+  })
+
+  it('dims with a clone that keeps the data, the accessors and picking', () => {
+    const dim = dimmer<ReturnType<typeof stationLayer>>()
+    const src = stationLayer(stationDots(rail, corridors, GAP), 'test-label-layer', 0, 14)
+    const dimmed = dim(src, 0.4)
+    expect(dimmed).not.toBe(src)
+    expect(dimmed.id).toBe(src.id)
+    expect(dimmed.props.opacity).toBe(0.4)
+    expect(dimmed.props.data).toBe(src.props.data)
+    expect(dimmed.props.getPosition).toBe(src.props.getPosition)
+    expect(dimmed.props.pickable).toBe(true)
+    // The same dimmed instance on every frame until something changes.
+    expect(dim(src, 0.4)).toBe(dimmed)
+  })
+
+  it('never hands back an instance it gave out before, going back to full strength', () => {
+    const dim = dimmer()
+    const src = lines()
+    const full = dim(src, 1)
+    const dimmed = dim(src, 0.4)
+    const again = dim(src, 1)
+    expect(again).not.toBe(full)
+    expect(again).not.toBe(dimmed)
+    expect(again.props.opacity).toBe(1)
+  })
+
+  it('follows a rebuilt source layer at the current opacity', () => {
+    const dim = dimmer()
+    dim(lines(), 0.4)
+    const next = lines()
+    const out = dim(next, 0.4)
+    expect(out).not.toBe(next)
+    expect(out.props.opacity).toBe(0.4)
+    expect(out.props.data).toBe(next.props.data)
   })
 })

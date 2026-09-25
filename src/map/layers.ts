@@ -1,3 +1,4 @@
+import type { Layer } from '@deck.gl/core'
 import { PathLayer, ScatterplotLayer } from '@deck.gl/layers'
 import { pointAt } from '../sim'
 import type { PreparedLine, PreparedNetwork } from '../sim'
@@ -316,4 +317,35 @@ export function networkLayers(
     sharedLineLayer(rail, corridors, gap, beforeId),
     stationLayer(stationDots(rail, corridors, gap), beforeId, 0, zoom),
   ] as const
+}
+
+/**
+ * One slot that hands a layer back at an opacity: the bus view's dimmed rail.
+ *
+ * Returns the same instance until the source layer or the opacity changes, so
+ * a view switch costs one `clone` per layer and ordinary frames cost nothing -
+ * deck.gl reads an unchanged instance as "nothing changed". A clone shares its
+ * source's data and accessors, so nothing is re-tessellated; only the opacity
+ * uniform moves, and picking is untouched, so dimmed rail stays clickable.
+ *
+ * Always a FRESH instance on a change, never one handed out before: going back
+ * to opacity 1 clones again rather than returning the original, which deck.gl
+ * has already retired in favour of the dimmed copy. Reusing a retired layer is
+ * the failure `liveLayers` documents.
+ */
+export function dimmer<L extends Layer>() {
+  let src: L | null = null
+  let opacity = 1
+  let out: L | null = null
+  return (layer: L, nextOpacity: number): L => {
+    if (layer !== src) {
+      src = layer
+      opacity = nextOpacity
+      out = nextOpacity === 1 ? layer : (layer.clone({ opacity: nextOpacity }) as L)
+    } else if (nextOpacity !== opacity) {
+      opacity = nextOpacity
+      out = layer.clone({ opacity: nextOpacity }) as L
+    }
+    return out!
+  }
 }

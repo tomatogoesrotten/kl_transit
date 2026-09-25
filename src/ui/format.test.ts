@@ -9,9 +9,12 @@ import {
   hhmmss,
   ink,
   liveStatusLine,
+  mapLabel,
   rejectLine,
   shortDateLine,
   stateLine,
+  stopsLine,
+  viewSentence,
 } from './format'
 
 describe('dur', () => {
@@ -151,5 +154,30 @@ describe('liveStatusLine', () => {
     expect(liveStatusLine(s, 8, NOW)).toBe(
       '8 shown, from live GPS. 1 position unusable: reported at 0,0.',
     )
+  })
+})
+
+describe('the view wording', () => {
+  it.each(['rail', 'bus'] as const)('keeps both kinds of position plain in the %s view', (view) => {
+    const label = mapLabel(view)
+    expect(label).toMatch(/trains placed by the timetable/)
+    expect(label).toMatch(/live GPS/)
+    expect(label).toContain(viewSentence(view))
+    // Nothing is estimated until stage 4 moves buses between reports.
+    expect(label).not.toMatch(/estimat/i)
+  })
+
+  it('names what each view puts in front', () => {
+    expect(viewSentence('rail')).toMatch(/^Rail view: the rail network in front/)
+    expect(viewSentence('bus')).toMatch(/^Bus view: .*live GPS.*bus stops.*rail network dimmed/)
+  })
+})
+
+describe('stopsLine', () => {
+  it('says loading and unavailable, and nothing once ready or before asking', () => {
+    expect(stopsLine('loading')).toBe('Loading bus stops…')
+    expect(stopsLine('failed')).toMatch(/^Bus stops are unavailable/)
+    expect(stopsLine('ready')).toBe('')
+    expect(stopsLine('idle')).toBe('')
   })
 })

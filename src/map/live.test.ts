@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { network } from '../sim'
 import type { LiveVehicle } from '../live/feed'
-import type { LiveFeed, LiveStore } from '../ui/store'
+import type { LiveFeed, LiveFeeds } from '../ui/store'
 import { hexToRgb } from './layers'
-import { angleFor, LIVE_STYLE, liveItems, liveLayers } from './live'
+import type { BusStop } from '../live/busdata'
+import { angleFor, busStopLayers, LIVE_STYLE, liveItems, liveLayers, STOP_MIN_ZOOM, stopsShown } from './live'
 
 const NOW = 1_790_309_400_000
 
@@ -28,7 +29,7 @@ function feed(vehicles: LiveVehicle[], version: number): LiveFeed {
   }
 }
 
-const store = (b: LiveFeed): LiveStore => ({ bus: b, ktm: feed([], 0) })
+const store = (b: LiveFeed): LiveFeeds => ({ bus: b, ktm: feed([], 0) })
 
 describe('LIVE_STYLE', () => {
   it.each(['city', 'wireframe'] as const)(
@@ -140,5 +141,46 @@ describe('liveLayers, the rebuild decision', () => {
     const s = store(feed([bus('A', 45)], 1))
     expect(draw(s, new Set(), NOW, 12, 'city').map((l) => l.id)).toEqual(['live-bus', 'live-ktm'])
     expect(draw(s, new Set(['bus']), NOW, 12, 'city').map((l) => l.id)).toEqual(['live-ktm'])
+  })
+})
+
+describe('bus stops, the zoom and view gate', () => {
+  const stops: BusStop[] = [['1005840', 'STESEN BRT SETIA JAYA', 101.61224, 3.08286]]
+
+  it('draws stops only in the bus view, from zoom 14', () => {
+    expect(STOP_MIN_ZOOM).toBe(14)
+    expect(stopsShown('bus', 14)).toBe(true)
+    expect(stopsShown('bus', 17)).toBe(true)
+    expect(stopsShown('bus', 13.99)).toBe(false)
+    expect(stopsShown('rail', 14)).toBe(false)
+    expect(stopsShown('rail', 17)).toBe(false)
+  })
+
+  it('has no layer before the stops arrive', () => {
+    expect(busStopLayers('label')(null, 'city', 'bus', 15)).toBeNull()
+  })
+
+  it('gates by visibility, and hands back the same instance while nothing crosses the gate', () => {
+    const draw = busStopLayers('label')
+    const far = draw(stops, 'city', 'bus', 12)!
+    expect(far.props.visible).toBe(false)
+    expect(draw(stops, 'city', 'bus', 13.5)).toBe(far)
+    const near = draw(stops, 'city', 'bus', 14.2)!
+    expect(near).not.toBe(far)
+    expect(near.props.visible).toBe(true)
+    expect(draw(stops, 'city', 'bus', 16)).toBe(near)
+    const rail = draw(stops, 'city', 'rail', 16)!
+    expect(rail.props.visible).toBe(false)
+    expect(rail.id).toBe('bus-stops')
+    expect(rail.props.pickable).toBe(true)
+  })
+
+  it('rebuilds in the other colours when the map style changes', () => {
+    const draw = busStopLayers('label')
+    const city = draw(stops, 'city', 'bus', 15)!
+    const wire = draw(stops, 'wireframe', 'bus', 15)!
+    expect(wire).not.toBe(city)
+    expect(wire.props.getFillColor).toEqual(LIVE_STYLE.stop.wireframe.fill)
+    expect(city.props.getFillColor).toEqual(LIVE_STYLE.stop.city.fill)
   })
 })

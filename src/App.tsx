@@ -5,6 +5,8 @@ import { Card, Chooser, FollowTag } from './ui/Card'
 import { Guide } from './ui/Guide'
 import { LinesPanel } from './ui/LinesPanel'
 import { TimeBar } from './ui/TimeBar'
+import { viewSentence } from './ui/format'
+import { useView } from './ui/store'
 
 export function App() {
   // The panels along the bottom, handed to the map so the camera knows how much
@@ -19,6 +21,8 @@ export function App() {
   // rather than as a second piece of state: `showModal()` is the browser's, and
   // a boolean mirroring whether a dialog is open is a boolean that can be wrong.
   const guide = useRef<HTMLDialogElement>(null)
+  // Rail or bus: the caption says which is in front. Changes only when a person switches.
+  const transitView = useView((s) => s.transitView)
 
   return (
     <>
@@ -30,7 +34,9 @@ export function App() {
       >
         {/* Collapsed, this is all that is left: an information mark, whose
             label carries the honesty rule for anyone who reads labels. */}
-        <summary aria-label="About KL Rail. Train positions are scheduled, not live. Bus and KTM ETS positions are live GPS.">
+        <summary
+          aria-label={`About KL Rail, ${transitView} view. Train positions are scheduled, not live. Bus and KTM ETS positions are live GPS.`}
+        >
           <span className="i" aria-hidden="true">
             i
           </span>
@@ -53,6 +59,9 @@ export function App() {
           reported itself, and each shows how old its position is. They appear only while the
           clock is at the present moment.
         </span>
+        {/* Which of the two the map puts in front, since the Rail/Bus switch.
+            Both kinds of position above stay true in either view. */}
+        <span>{viewSentence(transitView)}</span>
         {/* The way back into the guide, which is otherwise shown once and never
             again. A guide nobody can see twice is a guide nobody can recommend. */}
         <button className="guide-link" onClick={() => guide.current?.showModal()}>

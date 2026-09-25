@@ -360,6 +360,60 @@ describe('useView: live modes', () => {
   })
 })
 
+describe('the transit view', () => {
+  const view = () => useView.getState()
+
+  it('defaults to rail when nothing is remembered', () => {
+    // Node has no localStorage, which is the "nothing remembered" case.
+    expect(view().transitView).toBe('rail')
+  })
+
+  it('changes the view and nothing else: clock, selection, lines, modes, card', () => {
+    reset({ mode: 'paused', speed: 60, override: 'Sun' })
+    const aTrain: Selection = { kind: 'train', lineId: 'AG', dir: 0, dep: 21600, departedMs: 0 }
+    view().select(aTrain)
+    view().toggleLine('KJ')
+    view().toggleLive('ktm')
+    const clockBefore = { ...useClock.getState() }
+    const { transitView: _, ...viewBefore } = view()
+    view().setTransitView('bus')
+    expect(view().transitView).toBe('bus')
+    const { transitView: __, ...viewAfter } = view()
+    expect(viewAfter).toEqual(viewBefore)
+    // Identity too: the loop rebuilds on a NEW `hidden` set, so a copy would cost a rebuild.
+    expect(viewAfter.hidden).toBe(viewBefore.hidden)
+    expect(viewAfter.liveOff).toBe(viewBefore.liveOff)
+    expect(useClock.getState()).toEqual(clockBefore)
+    view().setTransitView('rail')
+    expect(view().transitView).toBe('rail')
+  })
+
+  it('remembers the choice and marks it on <html>', async () => {
+    const saved = new Map<string, string>()
+    const dataset: Record<string, string> = {}
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => saved.get(k) ?? null,
+      setItem: (k: string, v: string) => void saved.set(k, v),
+    })
+    vi.stubGlobal('document', { documentElement: { dataset } })
+    try {
+      vi.resetModules()
+      const first = (await import('./store')).useView
+      expect(first.getState().transitView).toBe('rail')
+      expect(dataset.transitView).toBe('rail')
+      first.getState().setTransitView('bus')
+      expect(dataset.transitView).toBe('bus')
+      // The next visit opens where this one left off.
+      vi.resetModules()
+      const next = (await import('./store')).useView
+      expect(next.getState().transitView).toBe('bus')
+    } finally {
+      vi.unstubAllGlobals()
+      vi.resetModules()
+    }
+  })
+})
+
 describe('receive: one feed answer into the store', () => {
   const NOW = 1_790_309_400_000
   const v = (id: string, ageS: number): LiveVehicle => ({

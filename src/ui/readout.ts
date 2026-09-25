@@ -2,9 +2,9 @@ import { firstDeparture, hhmm } from '../sim'
 import type { ActiveTrain, KlTime, PreparedNetwork } from '../sim'
 import { freshness, LIVE_MODES } from '../live/feed'
 import type { LiveMode, LiveVehicle } from '../live/feed'
-import { dateLine, hhmmss, liveStatusLine, shortDateLine, stateLine } from './format'
+import { dateLine, hhmmss, liveStatusLine, shortDateLine, stateLine, stopsLine } from './format'
 import { cardContent, runningPerLine } from './inspect'
-import type { LiveStore, Selection } from './store'
+import type { LiveStore, Selection, TransitView } from './store'
 import { useClock } from './store'
 
 /**
@@ -96,6 +96,8 @@ export const panels = {
   liveStatus: new Map<LiveMode, HTMLElement>(),
   /** Why live vehicles are hidden, when the clock is not at the present. */
   liveNote: null as HTMLElement | null,
+  /** The bus stops' load state, in the bus view. A polite live region. */
+  stopsStatus: null as HTMLElement | null,
 }
 
 /** Shows the hover description at a point on the map, or hides it. */
@@ -130,8 +132,18 @@ export function paintLive(
   off: ReadonlySet<LiveMode>,
   clockLive: boolean,
   nowMs: number,
+  view: TransitView,
 ) {
   if (panels.liveNote) panels.liveNote.hidden = clockLive
+  // Written only when it changes: it is a live region, and rewriting the same
+  // words four times a second can make a screen reader say them again. Never
+  // `hidden` either - a region that appears with its text is often not read out;
+  // CSS collapses it while empty.
+  const stops = panels.stopsStatus
+  if (stops) {
+    const text = view === 'bus' ? stopsLine(feeds.stops.state) : ''
+    if (stops.textContent !== text) stops.textContent = text
+  }
   for (const mode of LIVE_MODES) {
     const { held, status } = feeds[mode]
     let shown = 0

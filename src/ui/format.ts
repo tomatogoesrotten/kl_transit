@@ -1,6 +1,6 @@
 import type { DayType, KlTime } from '../sim'
 import type { Rejected } from '../live/feed'
-import type { ClockMode, LiveStatus, Speed } from './store'
+import type { ClockMode, LiveStatus, LoadState, Speed, TransitView } from './store'
 
 const pad = (n: number) => String(Math.floor(n)).padStart(2, '0')
 
@@ -136,4 +136,34 @@ export function liveStatusLine(s: LiveStatus, shown: number, nowMs: number): str
   }[s.state]
   const bad = rejectLine(s.rejected)
   return bad ? `${line} ${bad}` : line
+}
+
+/**
+ * What the chosen view puts in front, in one sentence, for the caption and the
+ * map's label. Buses are live GPS at their last report until estimation exists
+ * (stage 4 of #43), and this must say so in both views.
+ */
+export function viewSentence(view: TransitView): string {
+  return view === 'bus'
+    ? 'Bus view: Rapid KL buses at their live GPS positions, and from zoom 14 the bus stops ' +
+        'from the published bus timetable, with the rail network dimmed behind them.'
+    : 'Rail view: the rail network in front, with live buses drawn small beneath it.'
+}
+
+/** The canvas's `aria-label`: what the map is of, which kind of position is which, and how to move it. */
+export function mapLabel(view: TransitView): string {
+  return (
+    'Map of Klang Valley rail lines with trains placed by the timetable, and Rapid KL ' +
+    'buses and KTM ETS trains at their live GPS positions, each showing how old its position is. ' +
+    `${viewSentence(view)} ` +
+    'Arrow keys move the view, plus and minus zoom. ' +
+    'Stations can be selected from the lines panel.'
+  )
+}
+
+/** The bus stops' load state, said in the lines panel in the bus view. Empty when there is nothing to say. */
+export function stopsLine(state: LoadState): string {
+  if (state === 'loading') return 'Loading bus stops…'
+  if (state === 'failed') return 'Bus stops are unavailable: the stops file could not be loaded.'
+  return ''
 }
