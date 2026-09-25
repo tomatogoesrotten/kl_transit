@@ -300,7 +300,7 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   `decodeFeed` splits the message and decodes each entity alone, so that one is counted `missing`.
 - The KTMB feed carries only ETS intercity sets, no Komuter, so the mode is named
   "KTM ETS (intercity)" everywhere via `MODE_NAME`, and the data notes say Komuter may be running.
-  Its bearings (all 0) and speeds (all 90) are placeholders: KTM is drawn as a directionless disc.
+  Its bearings (all 0) and speeds (all 90) are placeholders: KTM is drawn as a directionless puck (stage 3 of #43).
   One sampled KTM train sat at 0.0027, 0.0155; positions within 0.1 degrees of 0,0 or outside
   Peninsular Malaysia are not drawn and are COUNTED in the panel's status line, never dropped
   silently. An empty KTM response (they alternate with full ones) keeps the held trains, ageing.
@@ -309,7 +309,7 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 - Bus routes are shown as "300 · feed id U3000", looked up in `data/bus-routes.json` by
   `routeName` in `src/ui/inspect.ts`. An id the lookup lacks is "U9999 (feed id)" — never read off
   its spelling: `T3048` is T304 and `S6060` is PAVILION BUKIT JALIL (PAVBJ).
-- Live markers are small and FLAT: at the map's pitch a ground-lying icon is foreshortened to about
+- The rail view's bus arrows are small and FLAT: at the map's pitch a ground-lying icon is foreshortened to about
   half its height, so they were first drawn at 4-9 px and nobody could find them. They are 10-18 px
   now, and coloured PER MAP VIEW (`LIVE_STYLE.color[view]`) - one dark slate vanished on the
   wireframe. The legend swatch follows the view through CSS variables, not React.
@@ -370,5 +370,24 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   from zoom 14, the base map's stops gone and back, no stops request until Bus is chosen, the live
   group at phone width and by screen reader. `BUS_VIEW_RAIL_OPACITY` (0.4) and `LIVE_STYLE.stop`
   are first guesses, to be tuned at that look (task 7.3).
-- Next: #43 (bus view, stages 3 and 4), #26 (the journey planner), and #35, where rotating while
+- Bus view, stage 3 (#43): two more models from `npm run models`, same palette texture, axes and
+  `W / MODEL_W` scale as the trains. `bus.gltf` is one rigid body, 9 x 3.4 x 3.4 m, its front (+X)
+  tapered and cab-shaded and its back square, drawn at street level in one neutral per map style -
+  so it cannot be taken for the articulated, elevated, line-coloured BRT Sunway. `ets.gltf` is an
+  octagonal puck 7 m across and 3 m tall, banded dark below and pale above, with yaw left at 0.
+  It is round ON PURPOSE: every elongated model has an axis, an axis on a map claims which way the
+  track runs, and KTM's bearings are placeholders with no published shapes to align to.
+  `models.test.ts` holds its X and Y extents equal. The train models came out byte-identical.
+- Which layer each view builds is `liveKind`: buses are models in the bus view and #40's arrows in
+  the rail view; ETS is a model in both, dimmed with rail in the bus view because it is a train.
+  Model layers have their OWN ids (`live-bus-model`, `live-ktm-model`): deck.gl matches layers by
+  id and would hand an IconLayer's state to a ScenegraphLayer. A model's `sizeScale` follows `W`
+  every frame through `clone`, which keeps data and accessors, so nothing is regenerated. A model
+  cannot be hollow, so stale is `alpha.stale` and the colour moved `model.staleGrey` towards mid
+  grey; a fresh model is opaque, because a translucent solid shows its own far side. A bus that
+  reported no bearing faces north, as its arrow always has.
+- Stage 3 not yet looked at: a live bus beside a BRT Sunway bus, ETS pucks pointing nowhere, stale
+  models reading as stale, in both views and both map styles. `LIVE_STYLE.model` is a first guess,
+  to be tuned at that look (task 8.4).
+- Next: #43 (bus view, stage 4), #26 (the journey planner), and #35, where rotating while
   following still does not work on touch.

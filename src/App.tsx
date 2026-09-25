@@ -117,8 +117,8 @@ export function App() {
             </li>
             <li>
               <strong>KTM ETS speed and heading are placeholders in the feed.</strong> Every ETS train
-              reports heading north at 90, so they are drawn as discs with no direction, and no
-              speed is shown for anything.
+              reports heading north at 90, so they are drawn as round, eight-sided pucks that point
+              nowhere, and no speed is shown for anything.
             </li>
             <li>
               <strong>An interchange appears once per line.</strong> The feed gives a station its

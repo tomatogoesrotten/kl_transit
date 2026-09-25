@@ -878,7 +878,15 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       // Left out entirely while the clock is not live: every mode is passed as
       // off, which also makes `liveLayers` forget its instances (see there).
       const feeds = useLive.getState()
-      const liveNow = s.live(feeds, live ? view.liveOff : ALL_LIVE_OFF, ms, zoom, modeRef.current)
+      const liveNow = s.live(
+        feeds,
+        live ? view.liveOff : ALL_LIVE_OFF,
+        ms,
+        zoom,
+        modeRef.current,
+        view.transitView,
+        W,
+      )
       // The bus view dims the whole rail network, names included, and keeps it
       // pickable. The static layers are re-dimmed only when they or the view
       // change (see `dimmer`); trains are new every frame and take it directly.

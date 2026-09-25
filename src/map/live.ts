@@ -1,10 +1,14 @@
 import { IconLayer, ScatterplotLayer } from '@deck.gl/layers'
+import { ScenegraphLayer } from '@deck.gl/mesh-layers'
 import { freshness, LIVE_MODES } from '../live/feed'
 import type { LiveMode, LiveVehicle } from '../live/feed'
 import type { BusStop } from '../live/busdata'
 import type { LiveFeeds, TransitView } from '../ui/store'
 import type { Interleaved } from './layers'
 import type { MapMode } from './modes'
+import { MODEL_W, yawFor } from './trains'
+import busModel from './models/bus.gltf?url'
+import etsModel from './models/ets.gltf?url'
 
 type Rgb = [number, number, number]
 
@@ -13,9 +17,11 @@ type Rgb = [number, number, number]
  *
  * Taste, not contract, like `WIREFRAME`: tune it by eye. What IS contract is
  * that live vehicles cannot be taken for scheduled trains - those are
- * line-coloured 3D models, these are flat markers in two colours no rail line
- * uses (`live.test.ts` checks) - and that buses do not bury the network at city
- * zoom: they are small, translucent, and drawn underneath it.
+ * line-coloured, elevated models; these are in two colours no rail line uses
+ * (`live.test.ts` checks), at street level, a rigid bus where the BRT is
+ * articulated and a round puck for KTM ETS - and that buses do not bury the
+ * network at city zoom in the rail view: there they are small flat arrows,
+ * translucent, drawn underneath it.
  */
 export const LIVE_STYLE = {
   /**
@@ -28,13 +34,17 @@ export const LIVE_STYLE = {
     city: { bus: [62, 78, 96], ktm: [196, 38, 160] },
     wireframe: { bus: [206, 218, 232], ktm: [236, 72, 200] },
   } as Record<MapMode, Record<LiveMode, Rgb>>,
-  /** Marker size in pixels, zoomed out (zoom 10) and close in (zoom 15). Linear between. */
-  sizePx: {
-    bus: [10, 18],
-    ktm: [14, 22],
-  } as Record<LiveMode, [far: number, near: number]>,
-  /** Alpha for a current report, and for a stale one, which is also drawn hollow. */
+  /** The rail view's bus arrow, in pixels, zoomed out (zoom 10) and close in (zoom 15). Linear between. */
+  arrowPx: [10, 18] as [far: number, near: number],
+  /** An arrow's alpha for a current report, and for a stale one, which is also drawn hollow. */
   alpha: { fresh: 240, stale: 150 },
+  /**
+   * The models (buses in the bus view, KTM ETS in both). A solid cannot be
+   * drawn hollow, so a stale one is its colour mixed `staleGrey` of the way to
+   * mid grey, at `alpha.stale`. A fresh one is opaque: a translucent solid
+   * shows its own far side through itself. Tuned by eye (task 8.4).
+   */
+  model: { freshAlpha: 255, staleGrey: 0.55 },
   /**
    * Bus stops, bus view only: a small dot in the buses' own colour with an
    * outline that contrasts with the ground, so a stop reads as "bus" and stands
@@ -67,28 +77,21 @@ const FAR_ZOOM = 10
 const NEAR_ZOOM = 15
 
 /**
- * The four markers, white on transparent, drawn as a mask so `getColor` colours
- * them. A bus is an arrowhead pointing UP (north, before rotation); a KTM ETS
- * train is a disc, because its feed's bearings are placeholders and a disc makes
- * no claim about direction. Stale is the same shape, hollow - a difference that
- * survives the wireframe view, where fading alone is hard to see.
+ * The rail view's bus arrow, white on transparent, drawn as a mask so
+ * `getColor` colours it: an arrowhead pointing UP (north, before rotation).
+ * Stale is the same shape, hollow - a difference that survives the wireframe
+ * view, where fading alone is hard to see. KTM ETS has no arrow: it is a model
+ * in both views.
  */
 const ARROW = '32,5 55,58 32,45 9,58'
 const ATLAS_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="64" viewBox="0 0 256 64">` +
+  `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="64" viewBox="0 0 128 64">` +
   `<polygon points="${ARROW}" fill="#fff"/>` +
   `<polygon points="${ARROW}" transform="translate(64 0)" fill="none" stroke="#fff" stroke-width="7" stroke-linejoin="round"/>` +
-  `<circle cx="160" cy="32" r="27" fill="#fff"/>` +
-  `<circle cx="224" cy="32" r="24" fill="none" stroke="#fff" stroke-width="7"/>` +
   `</svg>`
 const ICON_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(ATLAS_SVG)}`
 const icon = (x: number) => ({ x, y: 0, width: 64, height: 64, mask: true })
-const ICON_MAPPING = {
-  'bus-fresh': icon(0),
-  'bus-stale': icon(64),
-  'ktm-fresh': icon(128),
-  'ktm-stale': icon(192),
-}
+const ICON_MAPPING = { fresh: icon(0), stale: icon(64) }
 
 /**
  * `IconLayer`'s `getAngle`, in degrees, for a compass bearing.
@@ -108,9 +111,26 @@ export function angleFor(bearingDeg: number): number {
   return (360 - bearingDeg) % 360
 }
 
-/** Pixel size of a mode's marker at a zoom. Flat outside the two ends, so nothing jumps. */
-export function livePx(mode: LiveMode, zoom: number): number {
-  const [far, near] = LIVE_STYLE.sizePx[mode]
+/** A stale model's colour: the fresh one moved `LIVE_STYLE.model.staleGrey` of the way to mid grey. */
+export function staleRgb([r, g, b]: readonly number[]): Rgb {
+  const t = LIVE_STYLE.model.staleGrey
+  const mix = (c: number) => Math.round(c + (128 - c) * t)
+  return [mix(r), mix(g), mix(b)]
+}
+
+/**
+ * Whether a mode is drawn as a 3D model or a flat arrow in a view. KTM ETS is a
+ * model everywhere (a round puck, so no heading is claimed). Buses are models
+ * in the bus view and #40's arrows in the rail view, where a hundred of them
+ * must stay beneath the network.
+ */
+export function liveKind(mode: LiveMode, view: TransitView): 'model' | 'icon' {
+  return mode === 'ktm' || view === 'bus' ? 'model' : 'icon'
+}
+
+/** Pixel size of the bus arrow at a zoom. Flat outside the two ends, so nothing jumps. */
+export function livePx(zoom: number): number {
+  const [far, near] = LIVE_STYLE.arrowPx
   const t = Math.min(1, Math.max(0, (zoom - FAR_ZOOM) / (NEAR_ZOOM - FAR_ZOOM)))
   return far + (near - far) * t
 }
@@ -151,14 +171,15 @@ const CHECK_MS = 250
 // reference, so a fresh arrow per build would regenerate every attribute.
 const getPosition = (d: LiveItem) => d.v.position
 const getAngle = (d: LiveItem) => (d.v.bearing === null ? 0 : angleFor(d.v.bearing))
-const getIcon = (d: LiveItem) => `${d.v.mode}-${d.stale ? 'stale' : 'fresh'}`
+const getIcon = (d: LiveItem) => (d.stale ? 'stale' : 'fresh')
 
-function liveLayer(mode: LiveMode, items: LiveItem[], zoom: number, view: MapMode, beforeId: string) {
-  const [r, g, b] = LIVE_STYLE.color[view][mode]
+/** Buses in the rail view: #40's flat arrows. */
+function arrowLayer(items: LiveItem[], zoom: number, style: MapMode, beforeId: string) {
+  const [r, g, b] = LIVE_STYLE.color[style].bus
   const fresh: [number, number, number, number] = [r, g, b, LIVE_STYLE.alpha.fresh]
   const stale: [number, number, number, number] = [r, g, b, LIVE_STYLE.alpha.stale]
   return new IconLayer<LiveItem, Interleaved>({
-    id: `live-${mode}`,
+    id: 'live-bus',
     data: items,
     beforeId,
     pickable: true,
@@ -168,7 +189,7 @@ function liveLayer(mode: LiveMode, items: LiveItem[], zoom: number, view: MapMod
     // turns with it. A billboard would point relative to the screen instead.
     billboard: false,
     sizeUnits: 'pixels',
-    getSize: livePx(mode, zoom),
+    getSize: livePx(zoom),
     getPosition,
     getIcon,
     getAngle,
@@ -176,23 +197,84 @@ function liveLayer(mode: LiveMode, items: LiveItem[], zoom: number, view: MapMod
   })
 }
 
-type Built = { key: string; band: number; view: MapMode; checked: number; layer: IconLayer<LiveItem, Interleaved> }
+const MODEL_URL: Record<LiveMode, string> = { bus: busModel, ktm: etsModel }
+// A bus faces its reported bearing (north when it reported none, as the arrow
+// does). ETS takes the default [0, 0, 0]: its puck is eight-fold symmetric.
+const getOrientation = (d: LiveItem): [number, number, number] => [0, yawFor(d.v.bearing ?? 0), 0]
+
+/**
+ * A mode as a `ScenegraphLayer`, on the ground (the positions carry no height),
+ * scaled like the trains so it holds its size on screen until it floors at
+ * real-world metres. Its own id, never the arrow layer's: deck.gl matches layers
+ * by id, and handing an IconLayer's state to a ScenegraphLayer would break both.
+ */
+function modelLayer(
+  mode: LiveMode,
+  items: LiveItem[],
+  style: MapMode,
+  W: number,
+  opacity: number,
+  beforeId: string,
+) {
+  const rgb = LIVE_STYLE.color[style][mode]
+  const fresh: [number, number, number, number] = [...rgb, LIVE_STYLE.model.freshAlpha]
+  const stale: [number, number, number, number] = [...staleRgb(rgb), LIVE_STYLE.alpha.stale]
+  return new ScenegraphLayer<LiveItem, Interleaved>({
+    id: `live-${mode}-model`,
+    data: items,
+    beforeId,
+    opacity,
+    pickable: true,
+    scenegraph: MODEL_URL[mode],
+    // Flat: the path on which `getColor` multiplies the model's palette texture.
+    _lighting: 'flat',
+    sizeScale: W / MODEL_W,
+    getPosition,
+    ...(mode === 'bus' ? { getOrientation } : {}),
+    getColor: (d) => (d.stale ? stale : fresh),
+  })
+}
+
+type LiveLayer = IconLayer<LiveItem, Interleaved> | ScenegraphLayer<LiveItem, Interleaved>
+type Built = {
+  key: string
+  band: number
+  style: MapMode
+  view: TransitView
+  W: number
+  checked: number
+  layer: LiveLayer
+}
 
 /**
  * The live layers for a frame, rebuilt only when something visible changed.
  *
  * Called every frame. Freshness is re-checked when a new response arrives and
  * otherwise every quarter-second; a layer is rebuilt only when the version,
- * the set of stale or gone vehicles, the zoom band, or the map view moved. Every other frame
- * gets the same instances back, which is how deck.gl is told nothing changed.
+ * the set of stale or gone vehicles, the zoom band (arrows only), the map
+ * style or the transit view moved. Every other frame gets the same instances
+ * back, which is how deck.gl is told nothing changed - except that a model's
+ * `sizeScale` follows `W` continuously, as the trains' does, by a `clone` that
+ * keeps the data and accessors, so no attribute is regenerated.
+ *
+ * Which layer each view builds is `liveKind`. In the bus view KTM ETS is
+ * dimmed with the rail network, because it is a train.
  *
  * A mode switched off is left out entirely, and forgotten. While the clock is
  * not live the caller passes every mode as off, so the same rule covers it.
  */
 export function liveLayers(beforeId: string) {
   const built: Partial<Record<LiveMode, Built>> = {}
-  return (feeds: LiveFeeds, off: ReadonlySet<LiveMode>, nowMs: number, zoom: number, view: MapMode) => {
-    const out: IconLayer<LiveItem, Interleaved>[] = []
+  return (
+    feeds: LiveFeeds,
+    off: ReadonlySet<LiveMode>,
+    nowMs: number,
+    zoom: number,
+    style: MapMode,
+    view: TransitView,
+    W: number,
+  ) => {
+    const out: LiveLayer[] = []
     for (const mode of LIVE_MODES) {
       if (off.has(mode)) {
         // Forget it. deck.gl finalizes a layer the moment it leaves the list,
@@ -204,29 +286,44 @@ export function liveLayers(beforeId: string) {
       }
       const feed = feeds[mode]
       const had = built[mode]
-      const z = band(zoom)
+      const kind = liveKind(mode, view)
+      // Models are sized by `sizeScale`, so only arrows care about the zoom band.
+      const z = kind === 'icon' ? band(zoom) : 0
+      const same = (b: Built) => b.band === z && b.style === style && b.view === view
       const due =
         !had ||
-        had.band !== z ||
-        had.view !== view ||
+        !same(had) ||
         !had.key.startsWith(`${feed.version}|`) ||
         nowMs - had.checked >= CHECK_MS
       if (!due) {
-        out.push(had.layer)
+        out.push(resized(had, W))
         continue
       }
       const { items, key } = liveItems(feed.held, feed.version, nowMs)
-      if (had && had.key === key && had.band === z && had.view === view) {
+      if (had && had.key === key && same(had)) {
         had.checked = nowMs
-        out.push(had.layer)
+        out.push(resized(had, W))
         continue
       }
-      const layer = liveLayer(mode, items, z, view, beforeId)
-      built[mode] = { key, band: z, view, checked: nowMs, layer }
+      const dim = mode === 'ktm' && view === 'bus' ? BUS_VIEW_RAIL_OPACITY : 1
+      const layer =
+        kind === 'icon'
+          ? arrowLayer(items, z, style, beforeId)
+          : modelLayer(mode, items, style, W, dim, beforeId)
+      built[mode] = { key, band: z, style, view, W, checked: nowMs, layer }
       out.push(layer)
     }
     return out
   }
+}
+
+/** A model's layer at the current `W`: the same instance while `W` holds, a clone once it moves. */
+function resized(b: Built, W: number): LiveLayer {
+  if (b.W !== W && b.layer instanceof ScenegraphLayer) {
+    b.layer = b.layer.clone({ sizeScale: W / MODEL_W })
+    b.W = W
+  }
+  return b.layer
 }
 
 const stopPosition = (d: BusStop): [number, number] => [d[2], d[3]]

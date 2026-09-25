@@ -112,13 +112,13 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 8. Stage 3: models
 
-- [ ] 8.1 Extend `scripts/build_train_models.mjs` with a rigid bus (about 9 × 3.4 × 3.4 m, front
+- [x] 8.1 Extend `scripts/build_train_models.mjs` with a rigid bus (about 9 × 3.4 × 3.4 m, front
       tapered with the cab shade) and an octagonal ETS puck (about 7 m across, 3 m tall, banded), both
       using the palette texture. Run `npm run models`. Verify the console sizes and that the other four
       models are byte-identical.
-- [ ] 8.2 Extend `src/map/models.test.ts` with both: texture, indices, documented size, z = 0; the bus
+- [x] 8.2 Extend `src/map/models.test.ts` with both: texture, indices, documented size, z = 0; the bus
       lies along +X; the ETS model's X and Y extents are equal. Verify `npm test`.
-- [ ] 8.3 Draw buses as a `ScenegraphLayer` at ground level in the bus view, and ETS as a
+- [x] 8.3 Draw buses as a `ScenegraphLayer` at ground level in the bus view, and ETS as a
       `ScenegraphLayer` in both views (dimmed with rail in the bus view), coloured per map style,
       stale as lower alpha and grey-shifted. Rail view buses keep #40's arrows. Keep `liveLayers`'
       forget-when-off rule. Verify `live.test.ts` for which layer each view builds.
