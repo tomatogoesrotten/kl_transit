@@ -4,6 +4,8 @@ import type { LiveVehicle } from '../live/feed'
 import type { LiveFeed, LiveFeeds } from '../ui/store'
 import { hexToRgb } from './layers'
 import type { BusStop } from '../live/busdata'
+import { prepareShapes } from '../live/busdata'
+import type { LiveItem } from './live'
 import { IconLayer } from '@deck.gl/layers'
 import { ScenegraphLayer } from '@deck.gl/mesh-layers'
 import {
@@ -14,6 +16,7 @@ import {
   liveItems,
   liveKind,
   liveLayers,
+  routeLayers,
   staleRgb,
   STOP_MIN_ZOOM,
   stopsShown,
@@ -299,5 +302,112 @@ describe('staleRgb', () => {
     const t = LIVE_STYLE.model.staleGrey
     expect(staleRgb([228, 28, 128])).toEqual([Math.round(228 - 100 * t), Math.round(28 + 100 * t), 128])
     expect(staleRgb([128, 128, 128])).toEqual([128, 128, 128])
+  })
+})
+
+describe('liveLayers, buses moving on estimates', () => {
+  // One shape running due east through the test buses' position, on trip 't'.
+  const shapes = prepareShapes({
+    origin: network.origin,
+    shapes: { S: [[101.69, 3.1], [101.75, 3.1]] },
+    trips: { t: ['U6000', 'S'] },
+  })
+  const kx = network.origin.kx
+  /** Bus A reported `m` metres east of 101.7, `ageS` seconds before NOW. */
+  const at = (m: number, ageS: number, over: Partial<LiveVehicle> = {}): LiveVehicle => ({
+    ...bus('A', ageS),
+    position: [101.7 + m / kx, 3.1],
+    ...over,
+  })
+  const feeds = (v: LiveVehicle[], version: number): LiveFeeds => ({ bus: feed(v, version), ktm: feed([ets('E', 45)], 1) })
+  const lonOf = (l: { props: { data?: unknown } }) => (l.props.data as LiveItem[])[0].position[0]
+  const metres = (a: number, b: number) => Math.abs(a - b) * kx
+
+  it('draws nothing as estimated before the shapes arrive', () => {
+    const draw = liveLayers('label')
+    draw(feeds([at(0, 60)], 1), new Set(), NOW, 12, 'city', 'rail', 40)
+    draw(feeds([at(300, 0)], 2), new Set(), NOW + 16, 12, 'city', 'rail', 40)
+    expect(draw.item('bus', 'A')?.motion).toBeNull()
+    expect(draw.item('bus', 'A')?.position).toEqual(at(300, 0).position)
+  })
+
+  it('moves a bus with two reports along its shape, in the rail view', () => {
+    const draw = liveLayers('label')
+    draw(feeds([at(0, 60)], 1), new Set(), NOW - 1000, 12, 'city', 'rail', 40, shapes)
+    const [first] = draw(feeds([at(300, 0)], 2), new Set(), NOW, 12, 'city', 'rail', 40, shapes)
+    const [later] = draw(feeds([at(300, 0)], 2), new Set(), NOW + 20_000, 12, 'city', 'rail', 40, shapes)
+    expect(later).not.toBe(first)
+    const item = draw.item('bus', 'A')!
+    expect(item.motion).toEqual({ estimated: true, still: null, shapeId: 'S' })
+    // 300 m in 60 s, drawn at half that for 20 s: 50 m on from the report.
+    expect(metres(lonOf(later), 101.7 + 300 / kx)).toBeCloseTo(50, 0)
+    expect(item.bearing).toBeCloseTo(90, 6)
+  })
+
+  it('does not reset a bus when the view is switched: it carries on from where it was drawn', () => {
+    const draw = liveLayers('label')
+    draw(feeds([at(0, 120)], 1), new Set(), NOW - 2000, 12, 'city', 'rail', 40, shapes)
+    draw(feeds([at(300, 60)], 2), new Set(), NOW - 1000, 12, 'city', 'rail', 40, shapes)
+    // A report 900 m on: well ahead of the drawn bus, which catches up over 4 s.
+    draw(feeds([at(900, 0)], 3), new Set(), NOW, 12, 'city', 'rail', 40, shapes)
+    const [rail] = draw(feeds([at(900, 0)], 3), new Set(), NOW + 1000, 12, 'city', 'rail', 40, shapes)
+    const [bus] = draw(feeds([at(900, 0)], 3), new Set(), NOW + 1016, 12, 'city', 'bus', 40, shapes)
+    expect(bus.id).toBe('live-bus-model')
+    // Mid catch-up in both frames: continuous, and still far short of the report.
+    expect(metres(lonOf(bus), lonOf(rail))).toBeLessThan(5)
+    expect(lonOf(bus)).toBeGreaterThanOrEqual(lonOf(rail))
+    expect(metres(lonOf(bus), 101.7 + 900 / kx)).toBeGreaterThan(100)
+    expect(draw.item('bus', 'A')?.motion?.estimated).toBe(true)
+  })
+
+  it('forgets every bus when buses are switched off, and starts again from their reports', () => {
+    const draw = liveLayers('label')
+    draw(feeds([at(0, 60)], 1), new Set(), NOW - 1000, 12, 'city', 'rail', 40, shapes)
+    draw(feeds([at(300, 0)], 2), new Set(), NOW, 12, 'city', 'rail', 40, shapes)
+    draw(feeds([at(300, 0)], 2), new Set(['bus']), NOW + 1000, 12, 'city', 'rail', 40, shapes)
+    draw(feeds([at(300, 0)], 2), new Set(), NOW + 20_000, 12, 'city', 'rail', 40, shapes)
+    // One report known again, so no speed: at its place, not estimated.
+    expect(draw.item('bus', 'A')?.motion).toEqual({ estimated: false, still: 'first', shapeId: 'S' })
+  })
+
+  it('keeps unknown-trip and off-route buses at their reports, and counts them', () => {
+    const draw = liveLayers('label')
+    const lost = at(0, 30, { id: 'L', tripId: 'weekday_T7890_T789002_2' })
+    const off = at(0, 30, { id: 'O', position: [101.7, 3.1 + 1900 / network.origin.ky] })
+    draw(feeds([lost, off], 1), new Set(), NOW, 12, 'city', 'rail', 40, shapes)
+    expect(draw.item('bus', 'L')).toMatchObject({ position: lost.position, motion: { estimated: false, still: 'no-shape' } })
+    expect(draw.item('bus', 'O')).toMatchObject({ position: off.position, motion: { estimated: false, still: 'off-route' } })
+    expect(draw.unestimated()).toEqual({ noShape: 1, offRoute: 1 })
+  })
+
+  it('never estimates KTM ETS', () => {
+    const draw = liveLayers('label')
+    draw(feeds([at(0, 60)], 1), new Set(), NOW, 12, 'city', 'rail', 40, shapes)
+    expect(draw.item('ktm', 'E')?.motion).toBeNull()
+  })
+})
+
+describe('routeLayers', () => {
+  const { shapes } = prepareShapes({
+    origin: network.origin,
+    shapes: { S: [[101.69, 3.1], [101.75, 3.1]] },
+    trips: {},
+  })
+  const S = shapes.get('S')!
+
+  it('draws the selected shape, and nothing without one', () => {
+    const route = routeLayers('label')
+    expect(route(null, 'city')).toBeNull()
+    const layer = route(S, 'city')!
+    expect(layer.id).toBe('bus-route')
+    expect(layer.props.pickable).toBe(false)
+    expect(route(S, 'city')).toBe(layer)
+  })
+
+  it('never hands back an instance it stopped drawing', () => {
+    const route = routeLayers('label')
+    const first = route(S, 'city')
+    route(null, 'city')
+    expect(route(S, 'city')).not.toBe(first)
   })
 })

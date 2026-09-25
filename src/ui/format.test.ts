@@ -10,6 +10,7 @@ import {
   ink,
   liveStatusLine,
   mapLabel,
+  motionLine,
   rejectLine,
   shortDateLine,
   stateLine,
@@ -158,18 +159,53 @@ describe('liveStatusLine', () => {
 })
 
 describe('the view wording', () => {
-  it.each(['rail', 'bus'] as const)('keeps both kinds of position plain in the %s view', (view) => {
-    const label = mapLabel(view)
+  it.each(['rail', 'bus'] as const)(
+    'keeps every kind of position plain in the %s view, before the route shapes load',
+    (view) => {
+      const label = mapLabel(view, false)
+      expect(label).toMatch(/trains placed by the timetable/)
+      expect(label).toMatch(/KTM ETS trains at their live GPS positions/)
+      expect(label).toMatch(/Rapid KL buses at their live GPS positions/)
+      expect(label).toContain(viewSentence(view, false))
+      // Nothing is estimated until the shapes are there to estimate along.
+      expect(label).not.toMatch(/estimat/i)
+    },
+  )
+
+  it.each(['rail', 'bus'] as const)('says buses are estimated in the %s view once they are', (view) => {
+    const label = mapLabel(view, true)
     expect(label).toMatch(/trains placed by the timetable/)
-    expect(label).toMatch(/live GPS/)
-    expect(label).toContain(viewSentence(view))
-    // Nothing is estimated until stage 4 moves buses between reports.
-    expect(label).not.toMatch(/estimat/i)
+    expect(label).toMatch(/KTM ETS trains at their live GPS positions/)
+    expect(label).toMatch(/Rapid KL buses estimated between their live GPS reports/)
+    expect(label).toContain(viewSentence(view, true))
   })
 
   it('names what each view puts in front', () => {
-    expect(viewSentence('rail')).toMatch(/^Rail view: the rail network in front/)
-    expect(viewSentence('bus')).toMatch(/^Bus view: .*live GPS.*bus stops.*rail network dimmed/)
+    expect(viewSentence('rail', false)).toMatch(/^Rail view: the rail network in front/)
+    expect(viewSentence('bus', false)).toMatch(/^Bus view: .*live GPS positions.*bus stops.*rail network dimmed/)
+    expect(viewSentence('bus', true)).toMatch(/^Bus view: .*estimated between.*bus stops.*rail network dimmed/)
+  })
+})
+
+describe('motionLine', () => {
+  const none = { noShape: 0, offRoute: 0 }
+
+  it('says nothing, and never "estimated", before the route shapes are ready', () => {
+    expect(motionLine('idle', none)).toBe('')
+    expect(motionLine('loading', { noShape: 3, offRoute: 1 })).toBe('')
+  })
+
+  it('says estimated movement is unavailable when the shapes failed', () => {
+    expect(motionLine('failed', none)).toMatch(/^Estimated movement is unavailable/)
+  })
+
+  it('counts the buses that cannot be estimated, by why', () => {
+    expect(motionLine('ready', none)).toBe("Positions estimated between reports, along each bus's route.")
+    expect(motionLine('ready', { noShape: 1, offRoute: 2 })).toBe(
+      "Positions estimated between reports, along each bus's route. 3 at their last report: " +
+        '1 on a trip the timetable does not have, 2 off their route.',
+    )
+    expect(motionLine('ready', { noShape: 0, offRoute: 1 })).toMatch(/1 at their last report: 1 off its route\.$/)
   })
 })
 

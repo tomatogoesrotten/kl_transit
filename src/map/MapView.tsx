@@ -47,18 +47,18 @@ import {
 import type { TrainInstance } from './trains'
 import { FOOTPRINT_LAYER, layerOps, stationNameFilters, WIREFRAME } from './modes'
 import type { MapMode } from './modes'
-import { BUS_VIEW_RAIL_OPACITY, busStopLayers, liveLayers } from './live'
+import { BUS_VIEW_RAIL_OPACITY, busStopLayers, liveLayers, routeLayers } from './live'
 import type { LiveItem } from './live'
-import { startPolling } from '../live/poll'
-import { loadStops } from '../live/busdata'
+import { startPolling, untilNextMs } from '../live/poll'
+import { loadShapes, loadStops } from '../live/busdata'
 import type { BusStop } from '../live/busdata'
 import { LIVE_MODES } from '../live/feed'
 import type { LiveMode, LiveVehicle } from '../live/feed'
 import { ModeSwitch } from '../ui/ModeSwitch'
 import { ViewSwitch } from '../ui/ViewSwitch'
-import { mapLabel } from '../ui/format'
 import { distinctSelections, findTrain, trainSelection, vehicleHover } from '../ui/inspect'
-import { paintCard, paintCounts, paintLive, paintReadout, panels, showTip } from '../ui/readout'
+import type { BusMotion } from '../ui/inspect'
+import { paintCaption, paintCard, paintCounts, paintLive, paintReadout, panels, showTip } from '../ui/readout'
 import type { Selection } from '../ui/store'
 import { setMs, useClock, useLive, useView } from '../ui/store'
 import { PLACES, rail } from '../rail'
@@ -201,6 +201,8 @@ interface Statics {
   live: ReturnType<typeof liveLayers>
   /** The bus stops, once they have arrived. Rebuilt inside only when the gate or the style flips. */
   stops: ReturnType<typeof busStopLayers>
+  /** The selected bus's route, while it moves on an estimate. */
+  route: ReturnType<typeof routeLayers>
   /**
    * The static rail layers at the bus view's opacity. Each hands back the same
    * instance until its source layer or the view changes - see `dimmer`.
@@ -239,7 +241,10 @@ function hoverText(layerId: string | undefined, object: unknown, now: Frame | nu
   // A stop says its name, as published, and that it is a bus stop.
   if (layerId === 'bus-stops') return `Bus stop: ${(object as BusStop)[1]}`
   // Live layers only exist while the clock is live, so `now.ms` is the present.
-  if (layerId.startsWith('live-')) return vehicleHover((object as LiveItem).v, now.ms)
+  if (layerId.startsWith('live-')) {
+    const item = object as LiveItem
+    return vehicleHover(item.v, now.ms, item.motion?.estimated === true)
+  }
   if (!layerId.startsWith('trains-')) return null
   // By id, against this frame's own trains: the instance carries an identity
   // and nothing else, so that the renderer holds no references to the
@@ -307,9 +312,8 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   const styleLayers = useRef<ReturnType<Map['getStyle']>['layers']>([])
   const [styleLoaded, setStyleLoaded] = useState(false)
   const [mode, setMode] = useState<MapMode>(readMode)
-  // Rail or bus. Subscribed here for the base map's own bus stops and the
-  // canvas label, which change only when a person switches; the frame loop
-  // reads the store itself.
+  // Rail or bus. Subscribed here for the base map's own bus stops, which change
+  // only when a person switches; the frame loop reads the store itself.
   const transitView = useView((s) => s.transitView)
   // The mode for the frame loop, which is created once on mount and would
   // otherwise see only the mode it started with. Kept in step by the mode effect.
@@ -467,6 +471,10 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     // What the map shows depends on the view, so the label is written by the
     // view effect below, not here.
 
+    // Set on MapLibre's first `idle` after the overlay is added. Never set
+    // without WebGL2, where nothing could be moved anyway.
+    let mapDrawn = false
+
     m.on('load', () => {
       // Before addControl. deck.gl's interleaved overlay inserts its layers into
       // the style, and a snapshot taken after would hand the wireframe the very
@@ -574,6 +582,12 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             },
           })
           m.addControl(deck)
+          // The route shapes wait for this: style, first tiles and the first
+          // overlay frame all drawn, so 126 KB of shapes never competes with
+          // them. See the frame loop, and design.md, "Loading".
+          m.once('idle', () => {
+            mapDrawn = true
+          })
           const camera = cameraLayers(rail, CORRIDORS, beforeId)
           // From the store, not from the default: it is what the loop will
           // compare against, and starting from a different empty set would
@@ -595,6 +609,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             hidden,
             live: liveLayers(beforeId),
             stops: busStopLayers(beforeId),
+            route: routeLayers(beforeId),
             dim: { lines: dimmer(), shared: dimmer(), stations: dimmer(), labels: dimmer() },
           }
           overlay.current = deck
@@ -699,14 +714,16 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         lastPanels = now
         paintCounts(trains)
         const feeds = useLive.getState()
-        paintLive(feeds, view.liveOff, live, ms, view.transitView)
+        const drawnLive = statics.current?.live
+        paintLive(feeds, view.liveOff, live, ms, view.transitView, drawnLive?.unestimated())
+        paintCaption(view.transitView, feeds.shapes.state === 'ready', m.getCanvas())
         // The hovered vehicle's newest report, so its age moves with the clock
         // and resets when a new report lands. When the vehicle leaves the map
         // (clock not live, mode switched off, report too old) the tip goes too.
         const h = hovered.current
         if (h) {
           const v = live && !view.liveOff.has(h.v.mode) ? feeds[h.v.mode].held.get(h.v.id) : undefined
-          if (v) showTip(vehicleHover(v, ms), h.x, h.y)
+          if (v) showTip(vehicleHover(v, ms, drawnLive?.item(v.mode, v.id)?.motion?.estimated === true), h.x, h.y)
           else {
             hovered.current = null
             showTip(null, 0, 0)
@@ -715,13 +732,26 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         const sel = view.selection
         if (sel && view.cardOpen) {
           let vehicle: LiveVehicle | undefined
+          let motion: BusMotion | undefined
           if (sel.kind === 'vehicle') {
             const held = feeds[sel.mode].held.get(sel.id)
             if (held) lastVehicle = held
             else if (lastVehicle?.mode !== sel.mode || lastVehicle.id !== sel.id) lastVehicle = undefined
             vehicle = lastVehicle
+            if (sel.mode === 'bus' && held) {
+              // What the map drew for it last frame decides the wording, never
+              // the view: a bus is called estimated only while it is drawn so.
+              const drawn = drawnLive?.item('bus', sel.id)?.motion
+              const lastOk = feeds.bus.status.lastOkMs
+              motion = {
+                estimated: drawn?.estimated === true,
+                why: drawn?.still ?? (feeds.shapes.state === 'failed' ? 'shapes-failed' : null),
+                nextCheckMs: untilNextMs('bus'),
+                noNewer: held.receivedMs !== undefined && lastOk !== null && lastOk > held.receivedMs,
+              }
+            }
           }
-          paintCard(rail, sel, trains, t, ms, vehicle)
+          paintCard(rail, sel, trains, t, ms, vehicle, motion)
         }
       }
 
@@ -729,6 +759,9 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       // for a visit that stays in the rail view. Free after the first call.
       const busView = view.transitView === 'bus'
       if (busView) void loadStops()
+      // The route shapes, in either view, once the map has drawn, and only
+      // while buses are on. Free after the first call.
+      if (mapDrawn && !view.liveOff.has('bus')) void loadShapes()
 
       const deck = overlay.current
       const s = statics.current
@@ -886,6 +919,7 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         modeRef.current,
         view.transitView,
         W,
+        feeds.shapes.data,
       )
       // The bus view dims the whole rail network, names included, and keeps it
       // pickable. The static layers are re-dimmed only when they or the view
@@ -902,13 +936,22 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
       // finalized and handed back. Null until the stops have arrived.
       const stops = s.stops(feeds.stops.data, modeRef.current, view.transitView, zoom)
       const stopLayers = stops ? [stops] : []
+      // The selected bus's route, only while it is drawn on an estimate: the
+      // path its estimate assumes. Under the buses, in both views.
+      const sel = view.selection
+      const motion = live && sel?.kind === 'vehicle' ? s.live.item(sel.mode, sel.id)?.motion : null
+      const route = s.route(
+        motion?.estimated && motion.shapeId ? (feeds.shapes.data?.shapes.get(motion.shapeId) ?? null) : null,
+        modeRef.current,
+      )
+      const routeLayer = route ? [route] : []
       deck.setProps({
         // Rail view: buses first, under everything - a hundred buses must not
         // bury the network. Bus view: the reverse, dimmed rail first, then
         // stops, buses and KTM over it. Names last in both.
         layers: busView
-          ? [...railLayers, ...stopLayers, ...liveNow, names]
-          : [...liveNow, ...stopLayers, ...railLayers, names],
+          ? [...railLayers, ...stopLayers, ...routeLayer, ...liveNow, names]
+          : [...routeLayer, ...liveNow, ...stopLayers, ...railLayers, names],
       })
     }
     frame.current = requestAnimationFrame(tick)
@@ -951,7 +994,6 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
     labelsDirty.current = true
 
     const m = map.current
-    if (m) m.getCanvas().setAttribute('aria-label', mapLabel(transitView))
     if (!m || !styleLoaded) return
 
     // MapLibre types `setPaintProperty` as a property name paired with that

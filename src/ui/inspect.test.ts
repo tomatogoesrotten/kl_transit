@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { activeTrains, hhmm, klNow, network, nextDepartures, prepare } from '../sim'
 import type { ActiveTrain, KlTime } from '../sim'
 import {
+  cardNote,
   departedMs,
   departuresAt,
   distinctSelections,
@@ -20,6 +21,8 @@ import {
 } from './inspect'
 import type { LiveVehicle } from '../live/feed'
 import type { Selection, TrainSelection, VehicleSelection } from './store'
+import type { BusMotion } from './inspect'
+import { CARD_ROWS } from './readout'
 
 const rail = prepare(network)
 const ag = rail.lines.find((l) => l.id === 'AG')!
@@ -418,8 +421,82 @@ describe('live vehicles', () => {
     expect(vehicleCard(busSel, undefined, NOW).status).toMatch(/stopped reporting/)
   })
 
+  const moving: BusMotion = { estimated: true, why: null, nextCheckMs: 12_300, noNewer: false }
+
+  it('says on the card that a moving bus is estimated, its last GPS age, and the next check', () => {
+    const card = vehicleCard(busSel, bus, NOW, moving)
+    expect(card.pill).toBe('Rapid KL bus · Estimated from live GPS')
+    expect(card.sub).toMatch(/^Position estimated: moved along its published route from its last GPS report/)
+    expect(card.sub).toMatch(/never backwards, and for at most 150 s\.$/)
+    expect(card.rows.slice(-2)).toEqual([
+      ['Last GPS report', '45 s ago'],
+      ['Next update', 'in 13 s'],
+    ])
+    expect(card.rows.length).toBeLessThanOrEqual(CARD_ROWS)
+    expect(card.status).toBe('')
+    expect(vehicleCard(busSel, bus, NOW, { ...moving, nextCheckMs: 0 }).rows).toContainEqual(['Next update', 'due now'])
+  })
+
+  it('says when the last check brought no newer report, rather than implying a refresh', () => {
+    expect(vehicleCard(busSel, bus, NOW, { ...moving, noNewer: true }).status).toBe(
+      'No newer report at the last check.',
+    )
+  })
+
+  it('says a stale estimated bus stands where its estimate stopped', () => {
+    expect(vehicleCard(busSel, bus, NOW + 200_000, moving).status).toBe(
+      'No report for over 4 minutes. Drawn faded, standing where its estimate stopped.',
+    )
+  })
+
+  it.each([
+    ['no-shape', /not in the published timetable, so its route is unknown/],
+    ['off-route', /more than 50 m from its published route, so it is off it/],
+    ['first', /no speed can be measured yet/],
+    ['ambiguous', /runs along this street both ways/],
+    ['too-fast', /over 90 km\/h/],
+    ['shapes-failed', /Estimated movement is unavailable/],
+  ] as const)('says why a bus is at its report (%s), and never calls it estimated', (why, words) => {
+    const card = vehicleCard(busSel, bus, NOW, { estimated: false, why, nextCheckMs: 5_000, noNewer: true })
+    expect(card.pill).toBe('Rapid KL bus · Live GPS')
+    expect(card.sub).toMatch(/^Drawn /)
+    expect(card.sub).toMatch(words)
+    expect(card.sub).not.toMatch(/estimated(?! movement is unavailable)/i)
+    expect(card.rows).toContainEqual(['Last report', '45 s ago'])
+    expect(card.rows.some(([label]) => label === 'Next update')).toBe(false)
+  })
+
+  it('never calls a bus estimated before the shapes load, or a KTM train ever', () => {
+    const waiting = vehicleCard(busSel, bus, NOW, { estimated: false, why: null, nextCheckMs: 0, noNewer: false })
+    expect(waiting.pill).toBe('Rapid KL bus · Live GPS')
+    expect(waiting.sub).toBe('Drawn where its GPS last put it. Not predicted or smoothed between reports.')
+    expect(vehicleCard(etsSel, ets, NOW, moving).pill).toBe('KTM ETS (intercity) · Live GPS')
+  })
+
+  it('says estimated on hover, with the real report age, only for a bus drawn at an estimate', () => {
+    expect(vehicleHover(bus, NOW, true)).toBe('Rapid KL bus route 600 · feed id U6000 · estimated · last GPS 45 s ago')
+    expect(vehicleHover(bus, NOW, false)).toBe('Rapid KL bus route 600 · feed id U6000 · 45 s ago')
+    expect(vehicleHover(ets, NOW, true)).toBe('KTM ETS (intercity) ETS304 · 75 s ago')
+  })
+
   it('labels a vehicle in a crowded pick', () => {
     expect(selectionLabel(network, busSel)).toBe('Rapid KL bus VFB2440')
     expect(selectionLabel(network, etsSel)).toBe('KTM ETS (intercity), trip 9224')
+  })
+})
+
+describe('cardNote', () => {
+  const busSel: VehicleSelection = { kind: 'vehicle', mode: 'bus', id: 'VFB2440' }
+  const moving: BusMotion = { estimated: true, why: null, nextCheckMs: 0, noNewer: false }
+
+  it('says scheduled for trains and stations, live GPS for vehicles at their report', () => {
+    expect(cardNote({ kind: 'station', lineId: 'AG', stopId: 'AG1' })).toMatch(/^Scheduled from the published timetable/)
+    expect(cardNote(busSel)).toMatch(/^Live GPS: .*Not predicted between reports\.$/)
+    expect(cardNote(busSel, { ...moving, estimated: false, why: 'off-route' })).toMatch(/^Live GPS/)
+  })
+
+  it('says estimated only for a bus the map draws at an estimate, never for KTM', () => {
+    expect(cardNote(busSel, moving)).toMatch(/^Estimated from live GPS/)
+    expect(cardNote({ kind: 'vehicle', mode: 'ktm', id: '9224' }, moving)).toMatch(/^Live GPS/)
   })
 })

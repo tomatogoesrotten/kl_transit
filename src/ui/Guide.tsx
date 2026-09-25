@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { RefObject } from 'react'
+import { PREDICT_S } from '../live/estimate'
 
 const SEEN_KEY = 'kl-rail.guide-seen'
 
@@ -81,8 +82,18 @@ export function Guide({ ref }: { ref: RefObject<HTMLDialogElement | null> }) {
         </p>
         <p>
           Rapid KL buses and KTM ETS intercity trains are the exception. They <strong>are</strong>{' '}
-          live GPS: each is drawn where it last reported itself, and says how old that report is.
-          They are shown only while the clock is at the present moment.
+          live GPS: each says how old its last report is, and they are shown only while the clock
+          is at the present moment. A KTM ETS train is drawn where it last reported itself. A bus
+          is <em>estimated</em> between reports: once the route shapes have loaded, it is moved
+          along its published route from its last report, at a speed measured from its own
+          reports, for at most {PREDICT_S} seconds, and each new report corrects it. So a bus may pause,
+          or now and then jump, but it never drives backwards. A bus off its route, or on a trip
+          the timetable does not know, stays at its report.
+        </p>
+        <p>
+          The bus feed refreshes about once a minute; checking it every 30 seconds picks up a new
+          report sooner, not a fresher one. Bus stops and route numbers come from the published
+          bus timetable, refreshed daily.
         </p>
 
         <ul>

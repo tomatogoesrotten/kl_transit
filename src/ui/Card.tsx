@@ -90,7 +90,8 @@ export function Card() {
       {/* The card's primary action, directly under what the train is doing. It
           used to sit below the five-row table, which on a short card meant
           scrolling to reach the one button most people want. */}
-      {/* No follow for a live vehicle: it moves once a minute, in a jump. */}
+      {/* No follow for a live vehicle: a KTM train moves every two minutes in a
+          jump, and following a bus is a follow-up design.md leaves open. */}
       {!vehicle && (
         <button
           className="btn"
@@ -135,12 +136,15 @@ export function Card() {
       </table>
 
       {/* The honesty rule, on the one panel that gives times to the second.
-          It differs by kind, because the two kinds of position differ. */}
-      <p className="sched">
-        {vehicle
-          ? 'Live GPS: where the vehicle last reported itself, and how long ago. Not predicted between reports.'
-          : 'Scheduled from the published timetable, not a live feed.'}
-      </p>
+          It differs by kind, because the kinds of position differ - and for a
+          bus it turns on whether the map is drawing it at an estimate, which
+          only the frame loop knows, so it is painted there (`cardNote`). */}
+      <p
+        className="sched"
+        ref={(el) => {
+          panels.note = el
+        }}
+      />
 
     </aside>
   )

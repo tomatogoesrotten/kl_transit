@@ -2,6 +2,8 @@ import { DAY, hhmm, nextDepartures } from '../sim'
 import type { ActiveTrain, KlTime, Network, PreparedDirection, PreparedNetwork } from '../sim'
 import { ageSec, freshness, MODE_NAME } from '../live/feed'
 import type { LiveVehicle } from '../live/feed'
+import { MAX_KMH, OFF_ROUTE_M, PREDICT_S } from '../live/estimate'
+import type { Still } from '../live/estimate'
 import { ago, dur } from './format'
 import type { Selection, StationSelection, TrainSelection, VehicleSelection } from './store'
 import busRoutes from '../../data/bus-routes.json'
@@ -315,23 +317,65 @@ export function routeLabel(feedId: string | null): string {
 }
 
 /**
+ * How a selected bus is drawn, for its card. Worked out by the map, which is
+ * the only thing that knows; see `Motion` in src/map/live.ts.
+ */
+export interface BusMotion {
+  /** Drawn at an estimate. Only then may anything call its position estimated. */
+  estimated: boolean
+  /**
+   * Why it is at its report when it is not: a reason from estimation, the route
+   * shapes not being there (yet, or at all), or null when there is nothing to say.
+   */
+  why: Still | 'shapes-failed' | null
+  /** Milliseconds until the bus feed is next checked. */
+  nextCheckMs: number
+  /** The feed has answered since this report arrived, with nothing newer for this bus. */
+  noNewer: boolean
+}
+
+/** Why a bus is drawn at its report, finishing "Drawn ...". */
+const AT_REPORT: Record<Still | 'shapes-failed', string> = {
+  'shapes-failed':
+    'where its GPS last put it. Estimated movement is unavailable: the route shapes could not be loaded.',
+  'no-shape':
+    'where its GPS last put it, not moving: its trip is not in the published timetable, so its route is unknown.',
+  'off-route': `where its GPS last put it, not moving: it is more than ${OFF_ROUTE_M} m from its published route, so it is off it.`,
+  first:
+    'at its last GPS report, on its route, not moving: no speed can be measured yet from its reports on this trip.',
+  ambiguous:
+    'where its GPS last put it, not moving: its route runs along this street both ways, and its heading does not say which way it is going.',
+  'too-fast': `at its last GPS report, on its route, not moving: its last two reports would mean over ${MAX_KMH} km/h, so they were not matched to its route reliably.`,
+}
+
+/** "in 12 s" to the next check of the feed, or "due now". */
+const nextCheck = (ms: number) => (ms >= 1000 ? `in ${Math.ceil(ms / 1000)} s` : 'due now')
+
+/**
  * A live bus or KTM train: what the feed calls it, and how old its report is.
  *
  * A bus's route is named as the public knows it, with the feed's id beside it
  * (`routeName`). Other feed identifiers are shown as the feed gives them and
  * labelled as such.
  *
+ * A bus drawn at an estimate says so, gives its last real report's age, and
+ * counts down to the next check of the feed. One drawn at its report says why,
+ * and never says estimated.
+ *
  * @param v The newest report held for it, or the last one seen before it was
  *   dropped, or undefined when there is none at all.
  * @param nowMs The present, epoch ms. Vehicles are only shown while the clock is live.
+ * @param motion For a bus, how the map is drawing it. Omitted, it is at its report.
  */
 export function vehicleCard(
   sel: VehicleSelection,
   v: LiveVehicle | undefined,
   nowMs: number,
+  motion?: BusMotion,
 ): CardContent {
+  const estimated = sel.mode === 'bus' && motion?.estimated === true
   const head = {
-    pill: `${MODE_NAME[sel.mode]} · Live GPS`,
+    pill: `${MODE_NAME[sel.mode]} · ${estimated ? 'Estimated from live GPS' : 'Live GPS'}`,
     lineId: null,
     head: '',
     canFollow: false,
@@ -359,15 +403,39 @@ export function vehicleCard(
           ['Trip (feed id)', v.tripId ?? 'not given'],
         ]
   const age = ageSec(v.fixSec, nowMs)
-  rows.push(['Last report', ago(age)])
   const f = freshness(v.fixSec, nowMs)
+  const title = sel.mode === 'bus' ? `Route ${routeLabel(v.routeId)}` : (v.label ?? `Trip ${v.id}`)
+  const gone = `Stopped reporting. Its last report was ${ago(age)}, and it is no longer drawn.`
+  if (estimated) {
+    rows.push(['Last GPS report', ago(age)], ['Next update', nextCheck(motion!.nextCheckMs)])
+    return {
+      ...head,
+      title,
+      sub:
+        'Position estimated: moved along its published route from its last GPS report, at a ' +
+        `speed measured from its own reports, never backwards, and for at most ${PREDICT_S} s.`,
+      status:
+        f === 'gone'
+          ? gone
+          : f === 'stale'
+            ? 'No report for over 4 minutes. Drawn faded, standing where its estimate stopped.'
+            : motion!.noNewer
+              ? 'No newer report at the last check.'
+              : '',
+      rows,
+    }
+  }
+  rows.push(['Last report', ago(age)])
+  const why = sel.mode === 'bus' ? motion?.why : null
   return {
     ...head,
-    title: sel.mode === 'bus' ? `Route ${routeLabel(v.routeId)}` : (v.label ?? `Trip ${v.id}`),
-    sub: 'Drawn where its GPS last put it. Not predicted or smoothed between reports.',
+    title,
+    sub: why
+      ? `Drawn ${AT_REPORT[why]}`
+      : 'Drawn where its GPS last put it. Not predicted or smoothed between reports.',
     status:
       f === 'gone'
-        ? `Stopped reporting. Its last report was ${ago(age)}, and it is no longer drawn.`
+        ? gone
         : f === 'stale'
           ? `No report for over 4 minutes. Drawn faded, where it last reported.`
           : '',
@@ -375,14 +443,38 @@ export function vehicleCard(
   }
 }
 
-/** A live vehicle under the pointer, in a few words. */
-export function vehicleHover(v: LiveVehicle, nowMs: number): string {
+/**
+ * The card's closing line: the honesty rule for the kind of position on it.
+ * A bus is called estimated only while the map draws it at an estimate.
+ */
+export function cardNote(sel: Selection, motion?: BusMotion): string {
+  if (sel.kind !== 'vehicle') return 'Scheduled from the published timetable, not a live feed.'
+  if (sel.mode === 'bus' && motion?.estimated) {
+    return (
+      'Estimated from live GPS: moved along its route since its last report, and corrected ' +
+      'by the next. The age shown is the real report’s.'
+    )
+  }
+  return 'Live GPS: where the vehicle last reported itself, and how long ago. Not predicted between reports.'
+}
+
+/**
+ * A live vehicle under the pointer, in a few words.
+ *
+ * @param estimated Whether the map draws this bus at an estimate. Only then
+ *   does the hover say so; the age is always the real report's.
+ */
+export function vehicleHover(v: LiveVehicle, nowMs: number, estimated = false): string {
   const what = v.mode === 'bus' ? `route ${routeLabel(v.routeId)}` : (v.label ?? `trip ${v.id}`)
-  return `${MODE_NAME[v.mode]} ${what} · ${ago(ageSec(v.fixSec, nowMs))}`
+  const age = ago(ageSec(v.fixSec, nowMs))
+  return estimated && v.mode === 'bus'
+    ? `${MODE_NAME[v.mode]} ${what} · estimated · last GPS ${age}`
+    : `${MODE_NAME[v.mode]} ${what} · ${age}`
 }
 
 /**
  * @param vehicle For a vehicle selection, its report - see `vehicleCard`.
+ * @param motion For a bus, how the map draws it - see `vehicleCard`.
  */
 export function cardContent(
   rail: PreparedNetwork,
@@ -391,8 +483,9 @@ export function cardContent(
   t: KlTime,
   ms: number,
   vehicle?: LiveVehicle,
+  motion?: BusMotion,
 ): CardContent {
-  if (sel.kind === 'vehicle') return vehicleCard(sel, vehicle, ms)
+  if (sel.kind === 'vehicle') return vehicleCard(sel, vehicle, ms, motion)
   return sel.kind === 'train'
     ? trainCard(rail, sel, trains, ms)
     : stationCard(rail, sel, trains, t)

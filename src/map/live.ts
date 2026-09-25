@@ -1,8 +1,11 @@
-import { IconLayer, ScatterplotLayer } from '@deck.gl/layers'
+import { IconLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers'
 import { ScenegraphLayer } from '@deck.gl/mesh-layers'
 import { freshness, LIVE_MODES } from '../live/feed'
 import type { LiveMode, LiveVehicle } from '../live/feed'
-import type { BusStop } from '../live/busdata'
+import type { BusShape, BusShapes, BusStop } from '../live/busdata'
+import { drawnAt, onFix } from '../live/estimate'
+import type { Drawn, Still, Track } from '../live/estimate'
+import { pointAt } from '../sim'
 import type { LiveFeeds, TransitView } from '../ui/store'
 import type { Interleaved } from './layers'
 import type { MapMode } from './modes'
@@ -56,6 +59,11 @@ export const LIVE_STYLE = {
   } as Record<MapMode, { fill: Rgb; line: Rgb }>,
   /** A stop's radius and outline, in pixels. */
   stopPx: { radius: 3.5, line: 1.5 },
+  /**
+   * The selected bus's route shape, which its estimate follows: a thin line in
+   * the buses' own colour, drawn under the buses. Taste (task 12.2).
+   */
+  route: { alpha: 200, widthPx: 3 },
 } as const
 
 /**
@@ -135,16 +143,36 @@ export function livePx(zoom: number): number {
   return far + (near - far) * t
 }
 
-/** One drawn vehicle. The report itself, so a pick can describe it. */
+/**
+ * How a bus is placed once the route shapes have loaded. Null for KTM, and for
+ * every bus before the shapes arrive: then it is at its report, and nothing
+ * may call it estimated.
+ */
+export interface Motion {
+  /** Drawn at an estimate, moving along its route. The only case that may be called estimated. */
+  estimated: boolean
+  /** Why it is not moving, when it is not. See `Still`. */
+  still: Still | null
+  /** The shape it is drawn on, or null when it is at its reported coordinates. */
+  shapeId: string | null
+}
+
+/** One drawn vehicle: the report, so a pick can describe it, and where it is drawn. */
 export interface LiveItem {
   v: LiveVehicle
   stale: boolean
+  /** The report's position, its place on its route, or its estimate. */
+  position: [lon: number, lat: number]
+  /** Compass degrees: along its route while estimated, the reported bearing otherwise. */
+  bearing: number | null
+  motion: Motion | null
 }
 
 /**
- * The reports to draw, and a key that changes exactly when the drawing would:
- * a new response (the version), or a vehicle crossing a threshold. Gone
- * reports are left out - past ten minutes a vehicle is not drawn at all.
+ * The reports to draw, each at its report, and a key that changes exactly when
+ * the drawing would: a new response (the version), or a vehicle crossing a
+ * threshold. Gone reports are left out - past ten minutes a vehicle is not
+ * drawn at all. Estimation, where it applies, moves them afterwards.
  */
 export function liveItems(
   held: ReadonlyMap<string, LiveVehicle>,
@@ -156,7 +184,9 @@ export function liveItems(
   for (const v of held.values()) {
     const f = freshness(v.fixSec, nowMs)
     if (f !== 'fresh') notFresh.push(`${f[0]}${v.id}`)
-    if (f !== 'gone') items.push({ v, stale: f === 'stale' })
+    if (f !== 'gone') {
+      items.push({ v, stale: f === 'stale', position: v.position, bearing: v.bearing, motion: null })
+    }
   }
   return { items, key: `${version}|${notFresh.join(',')}` }
 }
@@ -169,8 +199,8 @@ const CHECK_MS = 250
 
 // Stable, module-level accessors. deck.gl compares accessor functions by
 // reference, so a fresh arrow per build would regenerate every attribute.
-const getPosition = (d: LiveItem) => d.v.position
-const getAngle = (d: LiveItem) => (d.v.bearing === null ? 0 : angleFor(d.v.bearing))
+const getPosition = (d: LiveItem) => d.position
+const getAngle = (d: LiveItem) => (d.bearing === null ? 0 : angleFor(d.bearing))
 const getIcon = (d: LiveItem) => (d.stale ? 'stale' : 'fresh')
 
 /** Buses in the rail view: #40's flat arrows. */
@@ -200,7 +230,7 @@ function arrowLayer(items: LiveItem[], zoom: number, style: MapMode, beforeId: s
 const MODEL_URL: Record<LiveMode, string> = { bus: busModel, ktm: etsModel }
 // A bus faces its reported bearing (north when it reported none, as the arrow
 // does). ETS takes the default [0, 0, 0]: its puck is eight-fold symmetric.
-const getOrientation = (d: LiveItem): [number, number, number] => [0, yawFor(d.v.bearing ?? 0), 0]
+const getOrientation = (d: LiveItem): [number, number, number] => [0, yawFor(d.bearing ?? 0), 0]
 
 /**
  * A mode as a `ScenegraphLayer`, on the ground (the positions carry no height),
@@ -244,6 +274,79 @@ type Built = {
   W: number
   checked: number
   layer: LiveLayer
+  items: LiveItem[]
+}
+
+/**
+ * What estimation remembers per bus between frames, for both views at once:
+ * switching view rebuilds the layer, never this, so a bus never moves for it.
+ */
+interface BusMotion {
+  /** The shapes the tracks were made against. New shapes start everything afresh. */
+  shapes: BusShapes | null
+  /** The feed version whose reports were last taken in. */
+  version: number
+  tracks: Map<string, Track>
+  drawn: Map<string, Drawn>
+}
+
+const shapeFor = (shapes: BusShapes, tripId: string | null): BusShape | null =>
+  (tripId === null ? undefined : shapes.shapes.get(shapes.trips.get(tripId) ?? '')) ?? null
+
+/**
+ * Moves this frame's bus items to where estimation draws them, in place.
+ *
+ * Reports are taken in (`onFix`) only when the feed's version moved and only
+ * for buses whose report changed; `drawnAt` runs for every bus every frame.
+ * A bus with no place on a shape keeps its reported position and bearing. A
+ * bus on its shape but not moving keeps its reported bearing: only an estimate
+ * turns it along the route.
+ */
+function moveBuses(
+  m: BusMotion,
+  items: LiveItem[],
+  held: ReadonlyMap<string, LiveVehicle>,
+  version: number,
+  shapes: BusShapes,
+  nowMs: number,
+) {
+  if (m.shapes !== shapes) {
+    m.shapes = shapes
+    m.version = -1
+    m.tracks.clear()
+    m.drawn.clear()
+  }
+  if (m.version !== version) {
+    m.version = version
+    for (const v of held.values()) {
+      const t = m.tracks.get(v.id)
+      if (!t || t.fixSec !== v.fixSec) m.tracks.set(v.id, onFix(t, v, shapeFor(shapes, v.tripId)))
+    }
+    // Buses no longer held (gone for age) are forgotten with them.
+    for (const id of m.tracks.keys()) {
+      if (!held.has(id)) {
+        m.tracks.delete(id)
+        m.drawn.delete(id)
+      }
+    }
+  }
+  for (const item of items) {
+    const track = m.tracks.get(item.v.id)
+    if (!track) continue
+    const d = drawnAt(m.drawn.get(item.v.id), track, nowMs)
+    const shape = d && shapeFor(shapes, track.tripId)
+    if (!d || !shape) {
+      m.drawn.delete(item.v.id)
+      item.motion = { estimated: false, still: track.still, shapeId: null }
+      continue
+    }
+    m.drawn.set(item.v.id, d)
+    const p = pointAt(shape, d.at, false)
+    const estimated = track.speed !== null
+    item.position = [p.lon, p.lat]
+    if (estimated) item.bearing = p.bearingDeg
+    item.motion = { estimated, still: track.still, shapeId: shape.id }
+  }
 }
 
 /**
@@ -265,7 +368,13 @@ type Built = {
  */
 export function liveLayers(beforeId: string) {
   const built: Partial<Record<LiveMode, Built>> = {}
-  return (
+  const motion: BusMotion = { shapes: null, version: -1, tracks: new Map(), drawn: new Map() }
+  /**
+   * @param shapes The route shapes once loaded, else null. With them, buses
+   *   move on estimates, in both views, and their layer is rebuilt every frame
+   *   as the trains' is; without them, every bus is at its report.
+   */
+  const draw = (
     feeds: LiveFeeds,
     off: ReadonlySet<LiveMode>,
     nowMs: number,
@@ -273,6 +382,7 @@ export function liveLayers(beforeId: string) {
     style: MapMode,
     view: TransitView,
     W: number,
+    shapes: BusShapes | null = null,
   ) => {
     const out: LiveLayer[] = []
     for (const mode of LIVE_MODES) {
@@ -280,17 +390,20 @@ export function liveLayers(beforeId: string) {
         // Forget it. deck.gl finalizes a layer the moment it leaves the list,
         // and handing that dead instance back when the mode returns fails an
         // assertion and leaves the vehicles undrawn and unpickable until the
-        // next rebuild.
+        // next rebuild. Buses' motion goes with it: nothing was drawn meanwhile.
         delete built[mode]
+        if (mode === 'bus') motion.shapes = null
         continue
       }
       const feed = feeds[mode]
       const had = built[mode]
       const kind = liveKind(mode, view)
+      const moving = mode === 'bus' && shapes !== null
       // Models are sized by `sizeScale`, so only arrows care about the zoom band.
       const z = kind === 'icon' ? band(zoom) : 0
       const same = (b: Built) => b.band === z && b.style === style && b.view === view
       const due =
+        moving ||
         !had ||
         !same(had) ||
         !had.key.startsWith(`${feed.version}|`) ||
@@ -300,7 +413,8 @@ export function liveLayers(beforeId: string) {
         continue
       }
       const { items, key } = liveItems(feed.held, feed.version, nowMs)
-      if (had && had.key === key && same(had)) {
+      if (moving) moveBuses(motion, items, feed.held, feed.version, shapes, nowMs)
+      else if (had && had.key === key && same(had)) {
         had.checked = nowMs
         out.push(resized(had, W))
         continue
@@ -310,10 +424,61 @@ export function liveLayers(beforeId: string) {
         kind === 'icon'
           ? arrowLayer(items, z, style, beforeId)
           : modelLayer(mode, items, style, W, dim, beforeId)
-      built[mode] = { key, band: z, style, view, W, checked: nowMs, layer }
+      built[mode] = { key, band: z, style, view, W, checked: nowMs, layer, items }
       out.push(layer)
     }
     return out
+  }
+  return Object.assign(draw, {
+    /** What was drawn for a vehicle on the last frame: where, and whether estimated. */
+    item: (mode: LiveMode, id: string): LiveItem | undefined =>
+      built[mode]?.items.find((d) => d.v.id === id),
+    /**
+     * Buses drawn on the last frame that cannot be estimated at all: on a trip
+     * the timetable does not have, or off their route. Said in the bus status
+     * line, so a gap in the estimate is visible rather than silent.
+     */
+    unestimated: () => {
+      const n = { noShape: 0, offRoute: 0 }
+      for (const d of built.bus?.items ?? []) {
+        if (d.motion?.still === 'no-shape') n.noShape++
+        else if (d.motion?.still === 'off-route') n.offRoute++
+      }
+      return n
+    },
+  })
+}
+
+/**
+ * The selected bus's route shape as a thin path, or null. Only while the bus is
+ * estimated: the line shows which way the estimate assumes it is going.
+ * Forgotten whenever it is not drawn, like every live layer, so an instance
+ * deck.gl has finalized is never handed back.
+ */
+export function routeLayers(beforeId: string) {
+  let built: { shape: BusShape; style: MapMode; layer: PathLayer<BusShape, Interleaved> } | null = null
+  return (shape: BusShape | null, style: MapMode) => {
+    if (!shape) return (built = null)
+    if (!built || built.shape !== shape || built.style !== style) {
+      const [r, g, b] = LIVE_STYLE.color[style].bus
+      built = {
+        shape,
+        style,
+        layer: new PathLayer<BusShape, Interleaved>({
+          // Not 'live-': the pick code reads that prefix as a vehicle. Not pickable either.
+          id: 'bus-route',
+          data: [shape],
+          beforeId,
+          getPath: (d) => d.path as [number, number][],
+          getColor: [r, g, b, LIVE_STYLE.route.alpha],
+          widthUnits: 'pixels',
+          getWidth: LIVE_STYLE.route.widthPx,
+          capRounded: true,
+          jointRounded: true,
+        }),
+      }
+    }
+    return built.layer
   }
 }
 

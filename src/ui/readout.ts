@@ -2,8 +2,21 @@ import { firstDeparture, hhmm } from '../sim'
 import type { ActiveTrain, KlTime, PreparedNetwork } from '../sim'
 import { freshness, LIVE_MODES } from '../live/feed'
 import type { LiveMode, LiveVehicle } from '../live/feed'
-import { dateLine, hhmmss, liveStatusLine, shortDateLine, stateLine, stopsLine } from './format'
-import { cardContent, runningPerLine } from './inspect'
+import {
+  captionLabel,
+  dateLine,
+  hhmmss,
+  liveSentence,
+  liveStatusLine,
+  mapLabel,
+  motionLine,
+  shortDateLine,
+  stateLine,
+  stopsLine,
+  viewSentence,
+} from './format'
+import { cardContent, cardNote, runningPerLine } from './inspect'
+import type { BusMotion } from './inspect'
 import type { LiveStore, Selection, TransitView } from './store'
 import { useClock } from './store'
 
@@ -88,6 +101,8 @@ export const panels = {
   head: null as HTMLElement | null,
   rows: [] as { row: HTMLElement; label: HTMLElement; value: HTMLElement }[],
   follow: null as HTMLElement | null,
+  /** The card's closing line: which kind of position this is. */
+  note: null as HTMLElement | null,
   total: null as HTMLElement | null,
   /** Line id -> the `<span>` its count is written into. */
   counts: new Map<string, HTMLElement>(),
@@ -98,6 +113,32 @@ export const panels = {
   liveNote: null as HTMLElement | null,
   /** The bus stops' load state, in the bus view. A polite live region. */
   stopsStatus: null as HTMLElement | null,
+  /** The caption's collapsed summary, its live-positions sentence, and its view sentence. */
+  about: null as HTMLElement | null,
+  liveKinds: null as HTMLElement | null,
+  viewLine: null as HTMLElement | null,
+}
+
+/** Sets text or an attribute only when it differs, so nothing is re-announced or relaid for nothing. */
+function put(el: HTMLElement | null, text: string, attr?: string) {
+  if (!el) return
+  if (attr) {
+    if (el.getAttribute(attr) !== text) el.setAttribute(attr, text)
+  } else if (el.textContent !== text) el.textContent = text
+}
+
+/**
+ * Everything that says which kind of position buses are: the caption's two
+ * sentences, its summary's label and the map canvas's label. Painted here, not
+ * rendered by React, because it turns on the route shapes having loaded - live
+ * state nothing in React subscribes to - and it must never say "estimated"
+ * before they have.
+ */
+export function paintCaption(view: TransitView, estimating: boolean, canvas: HTMLElement | null) {
+  put(panels.about, captionLabel(view, estimating), 'aria-label')
+  put(panels.liveKinds, liveSentence(estimating))
+  put(panels.viewLine, viewSentence(view, estimating))
+  put(canvas, mapLabel(view, estimating), 'aria-label')
 }
 
 /** Shows the hover description at a point on the map, or hides it. */
@@ -133,6 +174,7 @@ export function paintLive(
   clockLive: boolean,
   nowMs: number,
   view: TransitView,
+  unestimated: { noShape: number; offRoute: number } = { noShape: 0, offRoute: 0 },
 ) {
   if (panels.liveNote) panels.liveNote.hidden = clockLive
   // Written only when it changes: it is a live region, and rewriting the same
@@ -157,7 +199,11 @@ export function paintLive(
       ? ''
       : off.has(mode)
         ? 'Switched off, and not requested.'
-        : liveStatusLine(status, shown, nowMs)
+        : mode === 'bus'
+          ? [liveStatusLine(status, shown, nowMs), motionLine(feeds.shapes.state, unestimated)]
+              .filter(Boolean)
+              .join(' ')
+          : liveStatusLine(status, shown, nowMs)
     line.hidden = line.textContent === ''
   }
 }
@@ -173,8 +219,9 @@ export function paintCard(
   t: KlTime,
   ms: number,
   vehicle?: LiveVehicle,
+  motion?: BusMotion,
 ) {
-  const c = cardContent(net, selection, trains, t, ms, vehicle)
+  const c = cardContent(net, selection, trains, t, ms, vehicle, motion)
   if (panels.pill) panels.pill.textContent = c.pill
   if (panels.title) panels.title.textContent = c.title
   if (panels.sub) panels.sub.textContent = c.sub
@@ -195,4 +242,5 @@ export function paintCard(
   // when a person presses it; the loop owns whether there is anything to
   // follow, which changes when a trip ends. Different properties, no fight.
   if (panels.follow) panels.follow.hidden = !c.canFollow
+  put(panels.note, cardNote(selection, motion))
 }

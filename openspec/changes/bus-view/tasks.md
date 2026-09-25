@@ -163,16 +163,16 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       requests and never more than 3 in any 60 s window.
 - [x] 11.2 Export `untilNextMs(mode)` from `poll.ts`, and give `mergeFixes` a `receivedMs` so each held
       fix records when it arrived. Verify `feed.test.ts` for the new field.
-- [ ] 11.3 In BOTH views, keep tracks and drawn states inside `liveLayers`' closure, call `onFix` on a
+- [x] 11.3 In BOTH views, keep tracks and drawn states inside `liveLayers`' closure, call `onFix` on a
       version change and `drawnAt` every frame, and place and turn bus arrows (rail view) and models
       (bus view) with `pointAt`. Count buses that cannot be estimated (unknown trip, off route) in the
       bus status line. Verify with `live.test.ts` that switching view does not reset a bus's drawn
       state.
-- [ ] 11.4 Card for an estimated bus: "Position estimated", the last GPS report's age, "Next update in
+- [x] 11.4 Card for an estimated bus: "Position estimated", the last GPS report's age, "Next update in
       N s", and "No newer report at the last check" when true; a bus drawn at its report says why and
       never says estimated. Hover says estimated and the age for a moving bus only. Draw the selected
       bus's shape as a thin path. Verify `inspect.test.ts` for each wording.
-- [ ] 11.5 Caption, `aria-label` and guide (`Guide.tsx`): buses estimated between live GPS reports once
+- [x] 11.5 Caption, `aria-label` and guide (`Guide.tsx`): buses estimated between live GPS reports once
       shapes have loaded, live GPS before; estimation and its limits; that the bus feed refreshes about
       once a minute so 30 s polling gets fixes sooner but not fresher; where stops and route numbers
       come from. Verify with `grep -ri "scheduled\|live gps\|estimated" src`, reading every hit against
