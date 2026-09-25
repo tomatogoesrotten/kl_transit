@@ -247,7 +247,7 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   "no train faster than 120 km/h" measured against the DRAWN position does exactly that: smoothstep
   peaks at 1.5x the average, so the fastest legitimate segment (89.9 km/h, PH SP24->SP25) renders as
   ~135 km/h. It is measured against the timetable instead. Headroom today is 30.1 km/h.
-- Every feed check is proven to fail: `check:feed` breaks the data six ways on every run and asserts
+- Every feed check is proven to fail: `check:feed` breaks the data eight ways on every run and asserts
   each specific check fires. The daily log carries that evidence.
 - Deployed as a Cloudflare Worker serving static assets. Two fixes keep the map drawing at all, one
   per build — see the MapLibre worker note in the stack section. `ls dist/assets | grep worker` must
@@ -267,5 +267,15 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
 - Clickability is NOT the marker's size. The pick radius is 12 px for fine pointers and 18 for
   coarse. Growing a marker to make it easier to hit was tried and rejected — the visible marker and
   the hit target are different things.
-- Next: issues #23, #25 and #26 (merge interchanges, labels and filtering, the journey planner), and
-   #35, where rotating while following still does not work on touch.
+- Places (issue #23): `places()` in `src/sim/places.ts` groups the per-line stops into 160 places,
+  22 of them interchanges, by EXACT NAME and nothing else. Distance cannot do it: Ampang Park's two
+  stops are 293.6 m apart, while the closest two different stations (Plaza Rakyat, Merdeka) are
+  230.1 m apart. `check:feed` guards the name instead — `name-spread` fails at over 500 m between
+  same-named stops, `name-split` at under 100 m between differently-named ones.
+- A place's transfer distances come from the PUBLISHED coordinates, not the on-track points, which
+  would make Putra Heights' cross-platform change 124 m instead of 24 m. They are straight lines,
+  not walks; turning them into a time belongs to the journey planner (#26). A place's position is
+  the mean of its stops' on-track points — the true alignment, WITHOUT the shared-track pixel
+  offset, which only `src/map` knows. Labels (#25) must resolve that there. Nothing draws places yet.
+- Next: issues #25 and #26 (labels and filtering, the journey planner), #40 (live buses and KTM),
+  and #35, where rotating while following still does not work on touch.

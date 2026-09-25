@@ -122,3 +122,19 @@ export interface KlTime {
   today: DayType
   yesterday: DayType
 }
+
+/** One physical station: every per-line stop that carries the same name. See places.ts. */
+export interface Place {
+  /** The name itself: unique among places by construction, stable while the feed keeps the name. */
+  id: string
+  name: string
+  /** Stop ids, in network line order, then each line's direction-0 stop order. */
+  stops: string[]
+  /** Ids of the lines whose timetable calls at one of the stops, in network line order. */
+  lines: string[]
+  /** The mean of the stops' points on the track: the true alignment, without any drawn offset. */
+  lon: number
+  lat: number
+  /** Straight-line metres between every unordered pair of stops, from published coordinates. */
+  transfers: { from: string; to: string; metres: number }[]
+}
