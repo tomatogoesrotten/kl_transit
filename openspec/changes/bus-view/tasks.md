@@ -47,7 +47,7 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 - [x] 3.2 Add one break-it case per bus rule to the self-test, each asserting its own check fires.
       Verify the log prints "caught" for every bus case, and that deleting any one rule makes the
       self-test fail.
-- [ ] 3.3 Update `npm run check:feed` to include the bus arguments, and the workflow to download the
+- [x] 3.3 Update `npm run check:feed` to include the bus arguments, and the workflow to download the
       bus feed (with `--location`), build into `$RUNNER_TEMP`, check against the committed files, and
       commit the four data files in one commit only when any changed. Verify by a `workflow_dispatch`
       run's log that it passes and commits nothing when nothing changed.
