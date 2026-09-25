@@ -4,6 +4,7 @@ import { ageSec, freshness, MODE_NAME } from '../live/feed'
 import type { LiveVehicle } from '../live/feed'
 import { ago, dur } from './format'
 import type { Selection, StationSelection, TrainSelection, VehicleSelection } from './store'
+import busRoutes from '../../data/bus-routes.json'
 
 /**
  * What a card says, as plain strings.
@@ -282,12 +283,43 @@ export function stationCard(
   }
 }
 
+/** A bus route as the public knows it. `number` is null when the published routes do not have the id. */
+export interface RouteName {
+  /** The published short name: usually a number ("300"), a feeder code ("T304") or a name. */
+  number: string | null
+  /** The published long name, "Terminal Maluri ~ Lebuh Ampang", or null. */
+  longName: string | null
+  feedId: string
+}
+
+// [short name, long name]
+const ROUTES = busRoutes as Record<string, string[] | undefined>
+
+/**
+ * `U3000` to route "300", from the published bus timetable (data/bus-routes.json).
+ *
+ * An id the timetable does not have gets no number. It is never guessed from
+ * its spelling: `U3000` happens to read as 300, but `T3048` is T304 and `S6060`
+ * is PAVILION BUKIT JALIL (PAVBJ).
+ */
+export function routeName(feedId: string): RouteName {
+  const r = Object.prototype.hasOwnProperty.call(ROUTES, feedId) ? ROUTES[feedId] : undefined
+  return { number: r?.[0] || null, longName: r?.[1] || null, feedId }
+}
+
+/** "300 · feed id U3000", or "U9999 (feed id)" when the timetable does not know it, or "?" with no id. */
+export function routeLabel(feedId: string | null): string {
+  if (!feedId) return '? (no route id)'
+  const { number } = routeName(feedId)
+  return number ? `${number} · feed id ${feedId}` : `${feedId} (feed id)`
+}
+
 /**
  * A live bus or KTM train: what the feed calls it, and how old its report is.
  *
- * Feed identifiers are shown as the feed gives them and labelled as such.
- * `U6000` is Prasarana's internal id for public route 300, and saying "300"
- * would need a lookup from static GTFS that version 1 does not have.
+ * A bus's route is named as the public knows it, with the feed's id beside it
+ * (`routeName`). Other feed identifiers are shown as the feed gives them and
+ * labelled as such.
  *
  * @param v The newest report held for it, or the last one seen before it was
  *   dropped, or undefined when there is none at all.
@@ -313,10 +345,12 @@ export function vehicleCard(
       rows: [],
     }
   }
+  const route = v.routeId ? routeName(v.routeId) : null
   const rows: [string, string][] =
     sel.mode === 'bus'
       ? [
           ['Route (feed id)', v.routeId ?? 'not given'],
+          ...(route?.longName ? [['Runs', route.longName] as [string, string]] : []),
           ['Vehicle (plate)', v.id],
           ['Trip (feed id)', v.tripId ?? 'not given'],
         ]
@@ -329,7 +363,7 @@ export function vehicleCard(
   const f = freshness(v.fixSec, nowMs)
   return {
     ...head,
-    title: sel.mode === 'bus' ? `Route ${v.routeId ?? '?'} (feed id)` : (v.label ?? `Trip ${v.id}`),
+    title: sel.mode === 'bus' ? `Route ${routeLabel(v.routeId)}` : (v.label ?? `Trip ${v.id}`),
     sub: 'Drawn where its GPS last put it. Not predicted or smoothed between reports.',
     status:
       f === 'gone'
@@ -343,7 +377,7 @@ export function vehicleCard(
 
 /** A live vehicle under the pointer, in a few words. */
 export function vehicleHover(v: LiveVehicle, nowMs: number): string {
-  const what = v.mode === 'bus' ? `route ${v.routeId ?? '?'} (feed id)` : (v.label ?? `trip ${v.id}`)
+  const what = v.mode === 'bus' ? `route ${routeLabel(v.routeId)}` : (v.label ?? `trip ${v.id}`)
   return `${MODE_NAME[v.mode]} ${what} · ${ago(ageSec(v.fixSec, nowMs))}`
 }
 

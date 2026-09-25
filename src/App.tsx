@@ -101,9 +101,10 @@ export function App() {
               jumps when the next one arrives &mdash; nothing is predicted in between.
             </li>
             <li>
-              <strong>Buses are named by the feed&rsquo;s route id.</strong> The feed says{' '}
-              <code>U3000</code>, not the route number 300 on the bus. Looking the numbers up is a
-              later change.
+              <strong>Bus route numbers come from the published bus timetable.</strong> The live
+              feed says <code>U3000</code>; the timetable, refreshed daily, says that is route 300,
+              and both are shown. A route id the timetable does not know is shown as the feed
+              gives it, labelled as a feed id, never guessed.
             </li>
             <li>
               <strong>KTM ETS speed and heading are placeholders in the feed.</strong> Every ETS train

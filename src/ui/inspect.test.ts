@@ -12,6 +12,8 @@ import {
   stationCard,
   trainCard,
   trainSelection,
+  routeLabel,
+  routeName,
   vehicleCard,
   vehicleHover,
   whyLost,
@@ -360,16 +362,38 @@ describe('live vehicles', () => {
     expect(distinctSelections(picked)).toHaveLength(3)
   })
 
-  it('says on hover the mode, the route as a feed id, and the age', () => {
-    expect(vehicleHover(bus, NOW)).toBe('Rapid KL bus route U6000 (feed id) · 45 s ago')
+  it('says on hover the mode, the public route with its feed id, and the age', () => {
+    expect(vehicleHover(bus, NOW)).toBe('Rapid KL bus route 600 · feed id U6000 · 45 s ago')
     expect(vehicleHover(ets, NOW)).toBe('KTM ETS (intercity) ETS304 · 75 s ago')
+  })
+
+  it('shows a route the published timetable does not have as its feed id, unguessed', () => {
+    const unknown = { ...bus, routeId: 'U9999' }
+    expect(vehicleHover(unknown, NOW)).toBe('Rapid KL bus route U9999 (feed id) · 45 s ago')
+    const card = vehicleCard(busSel, unknown, NOW)
+    expect(card.title).toBe('Route U9999 (feed id)')
+    expect(card.rows).toContainEqual(['Route (feed id)', 'U9999'])
+    expect(card.rows.some(([label]) => label === 'Runs')).toBe(false)
+  })
+
+  it('looks route names up rather than reading them off the feed id', () => {
+    expect(routeName('U3000')).toEqual({ number: '300', longName: 'Terminal Maluri ~ Lebuh Ampang', feedId: 'U3000' })
+    expect(routeName('T3048').number).toBe('T304')
+    expect(routeName('S6060').number).toBe('PAVILION BUKIT JALIL (PAVBJ)')
+    expect(routeName('U9999')).toEqual({ number: null, longName: null, feedId: 'U9999' })
+    // Not fooled by a property every object has.
+    expect(routeName('toString').number).toBeNull()
+    expect(routeLabel('S6060')).toBe('PAVILION BUKIT JALIL (PAVBJ) · feed id S6060')
+    expect(routeLabel(null)).toBe('? (no route id)')
   })
 
   it('names the mode and Live GPS on the card, with the feed ids labelled as such', () => {
     const card = vehicleCard(busSel, bus, NOW)
     expect(card.pill).toBe('Rapid KL bus · Live GPS')
+    expect(card.title).toBe('Route 600 · feed id U6000')
     expect(card.rows).toEqual([
       ['Route (feed id)', 'U6000'],
+      ['Runs', 'Puchong Utama ~ Hab Pasar Seni'],
       ['Vehicle (plate)', 'VFB2440'],
       ['Trip (feed id)', 'weekday_U6000_U600001_9'],
       ['Last report', '45 s ago'],

@@ -54,10 +54,10 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 4. Stage 1: route numbers, the frozen hover, and the stage's look
 
-- [ ] 4.1 Add a pure `routeName(routeId)` beside the inspection formatting, using
+- [x] 4.1 Add a pure `routeName(routeId)` beside the inspection formatting, using
       `data/bus-routes.json`: `{ number: '300', feedId: 'U3000' }`, or `{ number: null, feedId }` for an
       unknown id. Verify tests for a known id, a name-type short name (`S6060`), and `U9999`.
-- [ ] 4.2 Show it in the existing hover and card: "300 · feed id U3000", or "U9999 (feed id)". Verify
+- [x] 4.2 Show it in the existing hover and card: "300 · feed id U3000", or "U9999 (feed id)". Verify
       by `inspect.test.ts` cases.
 - [ ] 4.3 Fix the frozen hover age: record the hovered vehicle in a ref in `onHover` and repaint the
       tip on the quarter-second gate. Verify by resting the pointer on a bus for 30 s: the age advances.

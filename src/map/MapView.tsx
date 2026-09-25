@@ -299,6 +299,10 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
   // Hover is for pointers that hover. Without this a tap flashes a description
   // before the card opens, because a browser sends a mousemove before a click.
   const coarse = useRef(false)
+  // The live vehicle under a still pointer, so the quarter-second gate can
+  // repaint its age. deck.gl fires onHover only when the pointer MOVES, so a tip
+  // written there alone would say "45 s ago" for as long as the pointer rests.
+  const hovered = useRef<{ v: LiveVehicle; x: number; y: number } | null>(null)
   // The last camera padding applied, so a one-shot move to a station is framed
   // in the same visible box the follow camera centres in.
   const padding = useRef<PaddingOptions>({ top: 0, right: 0, bottom: 0, left: 0 })
@@ -506,12 +510,18 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
             // radius it is uncatchable. Wider again for a fingertip.
             pickingRadius: PICK_RADIUS,
             onHover: (info) => {
+              const id = info.layer?.id
+              hovered.current =
+                !coarse.current && info.object && id?.startsWith('live-')
+                  ? { v: (info.object as LiveItem).v, x: info.x, y: info.y }
+                  : null
               if (coarse.current) return showTip(null, 0, 0)
-              showTip(hoverText(info.layer?.id, info.object, latest.current), info.x, info.y)
+              showTip(hoverText(id, info.object, latest.current), info.x, info.y)
             },
             onClick: (info) => {
               const now = latest.current
               if (!now) return
+              hovered.current = null
               showTip(null, 0, 0)
               // Every candidate under the click, not just the topmost one.
               //
@@ -668,6 +678,18 @@ export function MapView({ panels: column }: { panels: RefObject<HTMLDivElement |
         paintCounts(trains)
         const feeds = useLive.getState()
         paintLive(feeds, view.liveOff, live, ms)
+        // The hovered vehicle's newest report, so its age moves with the clock
+        // and resets when a new report lands. When the vehicle leaves the map
+        // (clock not live, mode switched off, report too old) the tip goes too.
+        const h = hovered.current
+        if (h) {
+          const v = live && !view.liveOff.has(h.v.mode) ? feeds[h.v.mode].held.get(h.v.id) : undefined
+          if (v) showTip(vehicleHover(v, ms), h.x, h.y)
+          else {
+            hovered.current = null
+            showTip(null, 0, 0)
+          }
+        }
         const sel = view.selection
         if (sel && view.cardOpen) {
           let vehicle: LiveVehicle | undefined
