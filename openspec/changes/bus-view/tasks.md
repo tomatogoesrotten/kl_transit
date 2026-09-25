@@ -59,12 +59,12 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       unknown id. Verify tests for a known id, a name-type short name (`S6060`), and `U9999`.
 - [x] 4.2 Show it in the existing hover and card: "300 · feed id U3000", or "U9999 (feed id)". Verify
       by `inspect.test.ts` cases.
-- [ ] 4.3 Fix the frozen hover age: record the hovered vehicle in a ref in `onHover` and repaint the
+- [x] 4.3 Fix the frozen hover age: record the hovered vehicle in a ref in `onHover` and repaint the
       tip on the quarter-second gate. Verify by resting the pointer on a bus for 30 s: the age advances.
-- [ ] 4.4 **Owner looks, during service hours**, in both map styles: bus hovers and cards show route
+- [x] 4.4 **Owner looks, during service hours**, in both map styles: bus hovers and cards show route
       numbers with feed ids, the hover age advances with the pointer still, and nothing else changed.
       Not done until somebody has seen it.
-- [ ] 4.5 CLAUDE.md Status for stage 1 (the archives, the three data files, the bus checks), then the
+- [x] 4.5 CLAUDE.md Status for stage 1 (the archives, the three data files, the bus checks), then the
       pull request (`Refs #43`) with the three checks' output. Merge before starting stage 2.
 
 ## 5. Stage 2: the view switch and rail dimming
@@ -73,10 +73,10 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       `localStorage` with try/catch like the map style, and written to
       `document.documentElement.dataset.transitView`. Verify with `store.test.ts`: defaults to rail,
       and switching changes no clock, camera, style, `hidden` or `liveOff` state.
-- [ ] 5.2 Add a `ViewSwitch` component: a `<fieldset>` with two native radios, Rail and Bus, beside
+- [x] 5.2 Add a `ViewSwitch` component: a `<fieldset>` with two native radios, Rail and Bus, beside
       `ModeSwitch`. Verify by keyboard (Tab, arrow keys) and at 360 px width that both are reachable,
       readable and announced.
-- [ ] 5.3 In the frame loop, read the view from `useView.getState()`; rebuild the static rail layers
+- [x] 5.3 In the frame loop, read the view from `useView.getState()`; rebuild the static rail layers
       with `opacity: BUS_VIEW_RAIL_OPACITY` when it changes (as for `hidden`), pass it to the train
       layers, and order layers per design.md. Verify rail stays clickable in the bus view, and that
       React DevTools' profiler shows no renders per frame while switching.
@@ -86,11 +86,11 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 6. Stage 2: bus stops
 
-- [ ] 6.1 Add `src/live/busdata.ts` with the stops loader: on the first `transitView === 'bus'`,
+- [x] 6.1 Add `src/live/busdata.ts` with the stops loader: on the first `transitView === 'bus'`,
       `fetch` the `?url` of `data/bus-stops.json`; state `idle | loading | ready | failed` in
       `useLive`. Verify in a production build (`vite preview`, not the dev server) that no request for
       the stops file is made until Bus is chosen.
-- [ ] 6.2 Paint the stops' load state in the lines panel's live group ("Loading bus stops…", "Bus stops
+- [x] 6.2 Paint the stops' load state in the lines panel's live group ("Loading bus stops…", "Bus stops
       are unavailable"). Verify by blocking the file's URL in developer tools.
 - [x] 6.3 Draw stops as one `ScatterplotLayer`, built once when the data arrives, `visible` only in
       the bus view at zoom 14 or closer, colours per map style in `LIVE_STYLE`, pickable for a hover
@@ -101,14 +101,14 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 - [x] 7.1 Make the caption in `App.tsx` and the canvas `aria-label` name the views correctly (buses are
       still live GPS at this stage). Verify by reading both views' text.
-- [ ] 7.2 Carried from #40: the lines panel's live group at 360 px width and by keyboard and screen
+- [x] 7.2 Carried from #40: the lines panel's live group at 360 px width and by keyboard and screen
       reader. Verify every switch, count and status line is reachable, readable and announced, with no
       sideways scroll.
-- [ ] 7.3 **Owner looks, during service hours**, both views in both map styles: the switch keeps the
+- [x] 7.3 **Owner looks, during service hours**, both views in both map styles: the switch keeps the
       camera, rail is dimmed but readable and clickable in the bus view, stops appear from zoom 14,
       the base map's own bus stops are gone in the bus view and back in the rail view. Tune
       `BUS_VIEW_RAIL_OPACITY` and the stop colours here.
-- [ ] 7.4 CLAUDE.md Status for stage 2, then the pull request (`Refs #43`). Merge before stage 3.
+- [x] 7.4 CLAUDE.md Status for stage 2, then the pull request (`Refs #43`). Merge before stage 3.
 
 ## 8. Stage 3: models
 
@@ -122,20 +122,20 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       `ScenegraphLayer` in both views (dimmed with rail in the bus view), coloured per map style,
       stale as lower alpha and grey-shifted. Rail view buses keep #40's arrows. Keep `liveLayers`'
       forget-when-off rule. Verify `live.test.ts` for which layer each view builds.
-- [ ] 8.4 **Owner looks, during service hours**, both views in both map styles: a live bus and a BRT
+- [x] 8.4 **Owner looks, during service hours**, both views in both map styles: a live bus and a BRT
       Sunway bus cannot be confused, ETS pucks imply no direction, stale models read as stale. Tune
       `LIVE_STYLE` here.
-- [ ] 8.5 CLAUDE.md Status for stage 3 (the two models, why ETS is directionless), then the pull
+- [x] 8.5 CLAUDE.md Status for stage 3 (the two models, why ETS is directionless), then the pull
       request (`Refs #43`). Merge before stage 4.
 
 ## 9. Stage 4: loading what motion needs
 
-- [ ] 9.1 Add the shapes loader to `src/live/busdata.ts`: on MapLibre's first `idle` after the overlay
+- [x] 9.1 Add the shapes loader to `src/live/busdata.ts`: on MapLibre's first `idle` after the overlay
       is added, while buses are on (otherwise when they are first switched on), `fetch` the `?url` of
       `data/bus-shapes.json`, prepare each shape into `{ origin, xs, zs, cum, total }`, index trips, and
       state `idle | loading | ready | failed` in `useLive`. Verify with a test on the prepare step,
       and in a production build that the request starts only after the map has drawn, in either view.
-- [ ] 9.2 Paint "Estimated movement is unavailable" in the live group when the shapes fail. Verify by
+- [x] 9.2 Paint "Estimated movement is unavailable" in the live group when the shapes fail. Verify by
       blocking the URL: buses stay at their reports and nothing says estimated.
 
 ## 10. Stage 4: the pure core
@@ -180,12 +180,12 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
 
 ## 12. Stage 4: calibration, the final look, and close-out
 
-- [ ] 12.1 Carried from #40. **Needs to be done at about 08:00 KL on a weekday and again at about
+- [ ] 12.1 (moved to #46, which must re-fit its speeds at those hours anyway) Carried from #40. **Needs to be done at about 08:00 KL on a weekday and again at about
       23:30 KL.** Re-sample both feeds (at most 4 requests a minute): vehicle counts, fix ages, KTM
       bearings, any Komuter in KTMB. Re-run the speed-factor backtest from design.md on the bus samples.
       If a normally reporting vehicle exceeds 240 s, or the backtest moves a constant, update the
       constant and design.md in the same commit. Verify the numbers are recorded in the pull request.
-- [ ] 12.2 **Owner looks, during service hours (about 06:00 to 23:00 KL), and ticks this list.** Both
+- [x] 12.2 **Owner looks, during service hours (about 06:00 to 23:00 KL), and ticks this list.** Both
       views, both map styles. Before the shapes arrive (throttle the network), buses sit at their fixes
       and nothing says estimated. After: buses glide, pause at lights now and then, occasionally
       jump, never reverse, in both views; switching view does not move them; a selected bus's card
@@ -198,6 +198,6 @@ Status line for what the stage did, and `Refs #43`. The last one says `Closes #4
       estimation constants and the correction rules, polling at 30 s and 120 s), the architecture block
       (`src/live/estimate.ts`, `busdata.ts`), and the commands (`build_bus_json.py`). Verify by reading
       it against this change.
-- [ ] 12.4 Final `npm test`, `npm run build` (worker chunk about 0.5 MB) and `npm run check:feed`, the
+- [x] 12.4 Final `npm test`, `npm run build` (worker chunk about 0.5 MB) and `npm run check:feed`, the
       pull request with `Closes #43`, and after merge `/opsx:archive bus-view`. Verify all three pass
       in the pull request's description.
