@@ -7,6 +7,7 @@ import {
   network,
   pointAt,
   prepare,
+  preparePath,
   progress,
   setTimeOfDay,
 } from './index'
@@ -67,6 +68,23 @@ describe('progress', () => {
 
   it('drops a train once its trip is over', () => {
     expect(progress(dir, dir.duration + 1)).toBe(null)
+  })
+})
+
+describe('preparePath', () => {
+  it('prepares a plain lon/lat path exactly as a rail line is prepared', () => {
+    const path = preparePath(network.lines[0].path as [number, number][], network.origin)
+    expect(path.total).toBe(ampang.total)
+    expect([...path.cum]).toEqual([...ampang.cum])
+    expect(pointAt(path, 5000, false)).toEqual(pointAt(ampang, 5000, false))
+  })
+
+  it('puts east at +x and north at -z, in metres from the origin', () => {
+    const { origin } = network
+    const p = preparePath([[origin.lon, origin.lat], [origin.lon + 0.001, origin.lat + 0.001]], origin)
+    expect(p.xs[1]).toBeCloseTo(0.001 * origin.kx, 6)
+    expect(p.zs[1]).toBeCloseTo(-0.001 * origin.ky, 6)
+    expect(p.total).toBeCloseTo(Math.hypot(0.001 * origin.kx, 0.001 * origin.ky), 6)
   })
 })
 

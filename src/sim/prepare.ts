@@ -4,7 +4,9 @@ import type {
   HeadwayWindow,
   Line,
   Network,
+  LonLat,
   Origin,
+  Path,
   PreparedDirection,
   PreparedLine,
   PreparedNetwork,
@@ -30,25 +32,28 @@ function prepareDirection(dir: Direction): PreparedDirection {
   return { ...dir, duration: dir.stops[dir.stops.length - 1].dep, deps }
 }
 
-function prepareLine(line: Line, origin: Origin): PreparedLine {
-  // Track geometry in local metres: x = east, z = south (so north is -z).
-  const n = line.path.length
+/**
+ * A lon/lat path in local metres: x = east, z = south (so north is -z), and the
+ * running Euclidean distance along it. Used for rail lines and bus shapes alike.
+ */
+export function preparePath(path: readonly LonLat[], origin: Origin): Path {
+  const n = path.length
   const xs = new Float64Array(n)
   const zs = new Float64Array(n)
   const cum = new Float64Array(n)
   for (let i = 0; i < n; i++) {
-    xs[i] = (line.path[i][0] - origin.lon) * origin.kx
-    zs[i] = -(line.path[i][1] - origin.lat) * origin.ky
+    xs[i] = (path[i][0] - origin.lon) * origin.kx
+    zs[i] = -(path[i][1] - origin.lat) * origin.ky
     if (i) cum[i] = cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], zs[i] - zs[i - 1])
   }
+  return { origin, xs, zs, cum, total: cum[n - 1] }
+}
+
+function prepareLine(line: Line, origin: Origin): PreparedLine {
   return {
     ...line,
     directions: line.directions.map(prepareDirection),
-    origin,
-    xs,
-    zs,
-    cum,
-    total: cum[n - 1],
+    ...preparePath(line.path, origin),
   }
 }
 

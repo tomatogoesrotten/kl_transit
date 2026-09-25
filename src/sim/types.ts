@@ -69,8 +69,12 @@ export interface PreparedDirection extends Direction {
   deps: Partial<Record<DayType, number[]>>
 }
 
-export interface PreparedLine extends Omit<Line, 'directions'> {
-  directions: PreparedDirection[]
+/**
+ * A path in the network's flat projection: everything `pointAt` reads. A rail
+ * line is one; so is a bus route shape (src/live/busdata.ts), prepared the same
+ * way so that the one function turns metres along either into a position.
+ */
+export interface Path {
   /** Copied from the network so pointAt can invert the projection without module state. */
   origin: Origin
   /** Path vertices in local metres, and the running distance along them. */
@@ -78,6 +82,10 @@ export interface PreparedLine extends Omit<Line, 'directions'> {
   zs: Float64Array
   cum: Float64Array
   total: number
+}
+
+export interface PreparedLine extends Omit<Line, 'directions'>, Path {
+  directions: PreparedDirection[]
 }
 
 export interface PreparedNetwork extends Omit<Network, 'lines'> {

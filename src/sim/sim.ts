@@ -1,9 +1,9 @@
 import type {
   ActiveTrain,
   DayType,
+  Path,
   Point,
   PreparedDirection,
-  PreparedLine,
   PreparedNetwork,
   Progress,
 } from './types'
@@ -46,8 +46,11 @@ export function progress(dir: PreparedDirection, offset: number): Progress | nul
   return { at: a.at + (b.at - a.at) * eased, dwelling: false, stop: i, secs: b.arr - offset }
 }
 
-/** Metres along the track -> position and heading. */
-export function pointAt(line: PreparedLine, at: number, reversed: boolean): Point {
+/**
+ * Metres along the track -> position and heading. Takes any `Path`, not only a
+ * rail line: bus route shapes are prepared the same way and use it too.
+ */
+export function pointAt(line: Path, at: number, reversed: boolean): Point {
   const d = Math.max(0, Math.min(line.total, reversed ? line.total - at : at))
   let lo = 0
   let hi = line.cum.length - 1

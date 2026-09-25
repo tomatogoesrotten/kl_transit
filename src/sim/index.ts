@@ -1,6 +1,6 @@
 export { network } from './network'
 export { places } from './places'
-export { prepare } from './prepare'
+export { prepare, preparePath } from './prepare'
 export {
   DAY,
   activeTrains,
