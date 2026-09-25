@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import brt from './models/brt.gltf?raw'
+import bus from './models/bus.gltf?raw'
+import ets from './models/ets.gltf?raw'
 import lrt from './models/lrt.gltf?raw'
 import mrl from './models/mrl.gltf?raw'
 import mrt from './models/mrt.gltf?raw'
@@ -28,9 +30,16 @@ const EXPECTED: Record<string, [number, number, number]> = {
   mrt: [22.4, 5.2, 4.0],
   mrl: [12.0, 3.2, 3.6],
   brt: [10.4, 3.2, 3.2],
+  // The live vehicles (src/map/live.ts): a rigid bus, and KTM ETS as an
+  // octagonal puck 7 m across flats, round so it claims no heading.
+  bus: [9.0, 3.4, 3.4],
+  ets: [7.0, 7.0, 3.0],
 }
 
-const FILES = { lrt, mrt, mrl, brt }
+const FILES = { lrt, mrt, mrl, brt, bus, ets }
+
+/** The models that have a direction of travel, which must be +X. The ETS puck has none. */
+const DIRECTED = new Set(['lrt', 'mrt', 'mrl', 'brt', 'bus'])
 
 /** A data-URI buffer, back into bytes. */
 function decode(uri: string): Uint8Array {
@@ -84,14 +93,33 @@ describe.each(Object.entries(FILES))('%s.gltf', (name, text) => {
     expect(size[2]).toBeCloseTo(EXPECTED[name][2], 3)
   })
 
-  it('lies along +X and sits on z = 0', () => {
-    // The convention `yawFor` and the viaduct height both assume: travel along
-    // +X, left along +Y, up from zero. A Blender export with "+Y Up" left on
-    // would fail this, and would otherwise just lie on its side in the city.
+  it('sits on z = 0, centred on its origin', () => {
     const { min, max } = gltf.accessors[prim.attributes.POSITION]
     expect(min[2]).toBeCloseTo(0, 6)
     expect(min[0]).toBeCloseTo(-max[0], 6)
+    expect(min[1]).toBeCloseTo(-max[1], 6)
+  })
+})
+
+describe.each(Object.entries(FILES).filter(([name]) => DIRECTED.has(name)))('%s.gltf, directed', (_, text) => {
+  const gltf = JSON.parse(text)
+  const prim = gltf.meshes[0].primitives[0]
+
+  it('lies along +X', () => {
+    // The convention `yawFor` and the viaduct height both assume: travel along
+    // +X, left along +Y, up from zero. A Blender export with "+Y Up" left on
+    // would fail this, and would otherwise just lie on its side in the city.
+    const { max } = gltf.accessors[prim.attributes.POSITION]
     expect(max[0]).toBeGreaterThan(max[1])
     expect(max[0]).toBeGreaterThan(max[2])
+  })
+})
+
+describe('ets.gltf, directionless', () => {
+  it('is as wide as it is long, so it points nowhere', () => {
+    // The feed's ETS bearings are placeholders. An elongated model would
+    // claim a heading; this one must not have a long axis to claim it with.
+    const { min, max } = JSON.parse(ets).accessors[0]
+    expect(max[0] - min[0]).toBeCloseTo(max[1] - min[1], 6)
   })
 })
