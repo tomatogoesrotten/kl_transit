@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { klNow } from '../sim'
-import { PEAK_SEC, setMs, useClock, useView } from './store'
+import { NO_REJECTS } from '../live/feed'
+import type { Decoded, LiveVehicle } from '../live/feed'
+import { PEAK_SEC, receive, setMs, useClock, useLive, useView } from './store'
 import type { Selection } from './store'
 
 // A fixed moment to scrub away from: Saturday 20 September 2025, 22:00 in Kuala
@@ -229,6 +231,7 @@ describe('useView: the card, following, and what one click found', () => {
       choices: [],
       goTo: null,
       hidden: new Set(),
+      liveOff: new Set(),
     })
   })
 
@@ -323,5 +326,122 @@ describe('useView: the card, following, and what one click found', () => {
     view().toggleFollow()
     view().toggleLine('AG')
     expect(view()).toMatchObject({ selection: null, cardOpen: false, following: false })
+  })
+})
+
+describe('useView: live modes', () => {
+  const view = () => useView.getState()
+  const aBus: Selection = { kind: 'vehicle', mode: 'bus', id: 'VFB2440' }
+
+  beforeEach(() => {
+    useView.setState({ selection: null, cardOpen: false, choices: [], hidden: new Set(), liveOff: new Set() })
+  })
+
+  it('switches a mode off and on again, with a new set each time', () => {
+    const before = view().liveOff
+    view().toggleLive('bus')
+    expect([...view().liveOff]).toEqual(['bus'])
+    expect(view().liveOff).not.toBe(before)
+    view().toggleLive('bus')
+    expect(view().liveOff.size).toBe(0)
+  })
+
+  it('clears a selected vehicle when its mode is hidden', () => {
+    view().select(aBus)
+    view().toggleLive('bus')
+    expect(view()).toMatchObject({ selection: null, cardOpen: false })
+  })
+
+  it('keeps a selected vehicle when the OTHER mode is hidden, or a rail line', () => {
+    view().select(aBus)
+    view().toggleLive('ktm')
+    view().toggleLine('AG')
+    expect(view().selection).toEqual(aBus)
+  })
+})
+
+describe('receive: one feed answer into the store', () => {
+  const NOW = 1_790_309_400_000
+  const v = (id: string, ageS: number): LiveVehicle => ({
+    mode: 'ktm',
+    id,
+    label: 'ETS304',
+    routeId: null,
+    tripId: id,
+    position: [101.7, 3.1],
+    bearing: null,
+    fixSec: NOW / 1000 - ageS,
+  })
+  const answer = (vehicles: LiveVehicle[], nullIsland = 0): Decoded => ({
+    ok: true,
+    headerSec: NOW / 1000,
+    vehicles,
+    rejected: { ...NO_REJECTS, nullIsland },
+  })
+  const ktm = () => useLive.getState().ktm
+
+  beforeEach(() => {
+    useLive.setState({
+      ktm: {
+        held: new Map(),
+        version: 0,
+        status: { state: 'waiting', lastOkMs: null, rejected: NO_REJECTS },
+      },
+    })
+  })
+
+  it('writes the store once per response', () => {
+    const listener = vi.fn()
+    const off = useLive.subscribe(listener)
+    receive('ktm', answer([v('1', 30), v('2', 30)], 1), NOW)
+    off()
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(ktm().held.size).toBe(2)
+    expect(ktm().status).toEqual({
+      state: 'ok',
+      lastOkMs: NOW,
+      rejected: { ...NO_REJECTS, nullIsland: 1 },
+    })
+  })
+
+  it('keeps what it holds through an empty answer, and says it was empty', () => {
+    receive('ktm', answer([v('1', 30)]), NOW)
+    receive('ktm', answer([]), NOW + 30_000)
+    expect(ktm().held.size).toBe(1)
+    expect(ktm().status.state).toBe('empty')
+  })
+
+  it('keeps what it holds through a failure, and remembers when it last answered', () => {
+    receive('ktm', answer([v('1', 30)], 1), NOW)
+    receive('ktm', 'rate-limited', NOW + 60_000)
+    expect(ktm().held.size).toBe(1)
+    expect(ktm().status).toEqual({ state: 'rate-limited', lastOkMs: NOW, rejected: NO_REJECTS })
+    receive('ktm', { ok: false }, NOW + 120_000)
+    expect(ktm().status.state).toBe('unreadable')
+  })
+
+  it('lets go of a report once it is past ten minutes', () => {
+    receive('ktm', answer([v('1', 30)]), NOW)
+    receive('ktm', 'unavailable', NOW + 600_000)
+    expect(ktm().held.size).toBe(0)
+  })
+})
+
+// The fixes change on every response and the frame loop reads them with
+// getState(). A component subscribed to them would re-render on each one, and
+// a hook in the frame loop would freeze at mount. Nothing may do either.
+const appSources = import.meta.glob(['../**/*.ts', '../**/*.tsx', '!../**/*.test.ts'], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
+describe('nothing subscribes to the live fixes', () => {
+  it('uses useLive only through getState or setState', () => {
+    const files = Object.keys(appSources)
+    expect(files).toContain('../live/poll.ts')
+    for (const file of files) {
+      expect(appSources[file], file).not.toMatch(/useLive\s*\(|useLive\.subscribe/)
+    }
   })
 })

@@ -77,7 +77,12 @@ export function Guide({ ref }: { ref: RefObject<HTMLDialogElement | null> }) {
         <p className="lead">
           Klang Valley trains, drawn on a map of Kuala Lumpur. They are placed by Prasarana&rsquo;s
           published timetable, <strong>not tracked</strong>: Rapid Rail has no live position feed,
-          so every train here is where it is <em>scheduled</em> to be, not where it is.
+          so every rail train here is where it is <em>scheduled</em> to be, not where it is.
+        </p>
+        <p>
+          Rapid KL buses and KTM ETS intercity trains are the exception. They <strong>are</strong>{' '}
+          live GPS: each is drawn where it last reported itself, and says how old that report is.
+          They are shown only while the clock is at the present moment.
         </p>
 
         <ul>
@@ -86,8 +91,9 @@ export function Guide({ ref }: { ref: RefObject<HTMLDialogElement | null> }) {
             or 60&times;. &ldquo;Now&rdquo; comes back to real Kuala Lumpur time.
           </li>
           <li>
-            <strong>Trains and stations can be clicked.</strong> A card opens with the journey, or
-            with the next departures. A train can also be followed, and the camera keeps up with it.
+            <strong>Trains, stations, buses and KTM ETS trains can be clicked.</strong> A card opens
+            with the journey, the next departures, or a live vehicle&rsquo;s last report. A train can
+            also be followed, and the camera keeps up with it.
           </li>
           <li>
             <strong>Wireframe</strong>, on the right, strips the city back to the shape of its

@@ -1,8 +1,10 @@
 import { firstDeparture, hhmm } from '../sim'
 import type { ActiveTrain, KlTime, PreparedNetwork } from '../sim'
-import { dateLine, hhmmss, shortDateLine, stateLine } from './format'
+import { freshness, LIVE_MODES } from '../live/feed'
+import type { LiveMode, LiveVehicle } from '../live/feed'
+import { dateLine, hhmmss, liveStatusLine, shortDateLine, stateLine } from './format'
 import { cardContent, runningPerLine } from './inspect'
-import type { Selection } from './store'
+import type { LiveStore, Selection } from './store'
 import { useClock } from './store'
 
 /**
@@ -89,6 +91,11 @@ export const panels = {
   total: null as HTMLElement | null,
   /** Line id -> the `<span>` its count is written into. */
   counts: new Map<string, HTMLElement>(),
+  /** Live mode -> its count, and its feed's status line. */
+  liveCounts: new Map<LiveMode, HTMLElement>(),
+  liveStatus: new Map<LiveMode, HTMLElement>(),
+  /** Why live vehicles are hidden, when the clock is not at the present. */
+  liveNote: null as HTMLElement | null,
 }
 
 /** Shows the hover description at a point on the map, or hides it. */
@@ -113,6 +120,37 @@ export function paintCounts(trains: readonly ActiveTrain[]) {
 }
 
 /**
+ * The live group in the lines panel: a count and a status line per mode, and
+ * the note that says why nothing live is drawn while the clock is elsewhere.
+ * Painted with the other counts, four times a second, because the ages in the
+ * status lines move with the clock.
+ */
+export function paintLive(
+  feeds: LiveStore,
+  off: ReadonlySet<LiveMode>,
+  clockLive: boolean,
+  nowMs: number,
+) {
+  if (panels.liveNote) panels.liveNote.hidden = clockLive
+  for (const mode of LIVE_MODES) {
+    const { held, status } = feeds[mode]
+    let shown = 0
+    for (const v of held.values()) if (freshness(v.fixSec, nowMs) !== 'gone') shown++
+    const count = panels.liveCounts.get(mode)
+    // Nothing is drawn while the clock is elsewhere, so nothing is counted.
+    if (count) count.textContent = clockLive && !off.has(mode) ? String(shown) : ''
+    const line = panels.liveStatus.get(mode)
+    if (!line) continue
+    line.textContent = !clockLive
+      ? ''
+      : off.has(mode)
+        ? 'Switched off, and not requested.'
+        : liveStatusLine(status, shown, nowMs)
+    line.hidden = line.textContent === ''
+  }
+}
+
+/**
  * Fills the open card. The shell — headings, close button, follow button — is
  * React's; everything that changes as the clock runs is written here.
  */
@@ -122,8 +160,9 @@ export function paintCard(
   trains: readonly ActiveTrain[],
   t: KlTime,
   ms: number,
+  vehicle?: LiveVehicle,
 ) {
-  const c = cardContent(net, selection, trains, t, ms)
+  const c = cardContent(net, selection, trains, t, ms, vehicle)
   if (panels.pill) panels.pill.textContent = c.pill
   if (panels.title) panels.title.textContent = c.title
   if (panels.sub) panels.sub.textContent = c.sub

@@ -8,7 +8,11 @@ import { describe, expect, it } from 'vitest'
 // project has no @types/node, so `import 'node:fs'` would not type-check. The
 // glob is resolved on every run, so a file added to src/sim later is scanned too.
 // Test files are excluded: they may legitimately touch the clock and the host.
-const sources = import.meta.glob(['./*.ts', '!./*.test.ts'], {
+//
+// src/live/feed.ts is held to the same rules: it decides what a live vehicle is
+// and how old it is, so it takes time as an argument too. Its neighbour poll.ts
+// is the side-effecting half and is deliberately NOT scanned.
+const sources = import.meta.glob(['./*.ts', '../live/feed.ts', '!./*.test.ts'], {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -35,12 +39,14 @@ function violations(source: string): string[] {
   return found
 }
 
-describe('src/sim stays pure', () => {
+describe('src/sim and src/live/feed.ts stay pure', () => {
   const files = Object.keys(sources)
 
-  it('scans the modules in src/sim, and only those', () => {
+  it('scans the modules in src/sim and the live feed core, and only those', () => {
     // If the glob silently matched nothing, every test below would pass on air.
     expect(files).toContain('./sim.ts')
+    expect(files).toContain('../live/feed.ts')
+    expect(files).not.toContain('../live/poll.ts')
     expect(files.filter((f) => f.endsWith('.test.ts'))).toEqual([])
   })
 

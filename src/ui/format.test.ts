@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { klNow } from '../sim'
 import type { KlTime } from '../sim'
-import { dateLine, dur, hhmmss, ink, shortDateLine, stateLine } from './format'
+import { NO_REJECTS } from '../live/feed'
+import {
+  ago,
+  dateLine,
+  dur,
+  hhmmss,
+  ink,
+  liveStatusLine,
+  rejectLine,
+  shortDateLine,
+  stateLine,
+} from './format'
 
 describe('dur', () => {
   it('says "now" rather than counting the last few seconds down', () => {
@@ -75,5 +86,70 @@ describe('ink', () => {
     // it light enough to need dark text.
     expect(ink('#FFCD00')).toBe('#15202b')
     expect(ink('#115740')).toBe('#ffffff')
+  })
+})
+
+describe('ago', () => {
+  it('counts seconds for two minutes, then whole minutes rounded down', () => {
+    expect(ago(0)).toBe('0 s ago')
+    expect(ago(45.6)).toBe('45 s ago')
+    expect(ago(119)).toBe('119 s ago')
+    expect(ago(120)).toBe('2 min ago')
+    expect(ago(239)).toBe('3 min ago')
+    // The moment a report turns stale, the label says four minutes.
+    expect(ago(240)).toBe('4 min ago')
+  })
+})
+
+describe('rejectLine', () => {
+  it('says nothing when every position was usable', () => {
+    expect(rejectLine(NO_REJECTS)).toBe('')
+  })
+
+  it('names the reason for one kind', () => {
+    expect(rejectLine({ ...NO_REJECTS, nullIsland: 1 })).toBe(
+      '1 position unusable: reported at 0,0.',
+    )
+  })
+
+  it('counts each reason when there are several', () => {
+    expect(rejectLine({ ...NO_REJECTS, nullIsland: 1, outside: 2 })).toBe(
+      '3 positions unusable: 1 reported at 0,0, 2 outside Peninsular Malaysia.',
+    )
+  })
+})
+
+describe('liveStatusLine', () => {
+  const NOW = 1_790_309_400_000
+  const status = (state: Parameters<typeof liveStatusLine>[0]['state'], lastOkMs: number | null = NOW - 90_000) => ({
+    state,
+    lastOkMs,
+    rejected: NO_REJECTS,
+  })
+
+  it('says how many are shown when the feed is healthy', () => {
+    expect(liveStatusLine(status('ok'), 121, NOW)).toBe('121 shown, from live GPS.')
+  })
+
+  it('says an empty response was empty, and that earlier ones are still drawn', () => {
+    expect(liveStatusLine(status('empty'), 8, NOW)).toBe(
+      'The latest response was empty. 8 still shown from earlier reports.',
+    )
+  })
+
+  it('says a failure is a failure, and when the feed last answered', () => {
+    expect(liveStatusLine(status('unavailable'), 0, NOW)).toBe(
+      'Feed unavailable. Last answered 90 s ago.',
+    )
+    expect(liveStatusLine(status('rate-limited', null), 0, NOW)).toMatch(
+      /^Rate-limited by the API.*It has not answered yet\.$/,
+    )
+  })
+
+  it('adds the unusable positions to the line', () => {
+    const s = { ...status('ok'), rejected: { ...NO_REJECTS, nullIsland: 1 } }
+    expect(liveStatusLine(s, 8, NOW)).toBe(
+      '8 shown, from live GPS. 1 position unusable: reported at 0,0.',
+    )
   })
 })

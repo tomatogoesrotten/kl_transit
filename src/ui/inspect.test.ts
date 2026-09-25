@@ -7,13 +7,17 @@ import {
   distinctSelections,
   findTrain,
   runningWaits,
+  selectionKey,
   selectionLabel,
   stationCard,
   trainCard,
   trainSelection,
+  vehicleCard,
+  vehicleHover,
   whyLost,
 } from './inspect'
-import type { TrainSelection } from './store'
+import type { LiveVehicle } from '../live/feed'
+import type { Selection, TrainSelection, VehicleSelection } from './store'
 
 const rail = prepare(network)
 const ag = rail.lines.find((l) => l.id === 'AG')!
@@ -322,5 +326,76 @@ describe('the lines panel station buttons', () => {
       }
     }
     expect(buttons).toBeGreaterThan(180)
+  })
+})
+
+describe('live vehicles', () => {
+  const NOW = 1_790_309_400_000
+  const bus: LiveVehicle = {
+    mode: 'bus',
+    id: 'VFB2440',
+    label: null,
+    routeId: 'U6000',
+    tripId: 'weekday_U6000_U600001_9',
+    position: [101.66, 3.08],
+    bearing: 235.7,
+    fixSec: NOW / 1000 - 45,
+  }
+  const ets: LiveVehicle = {
+    mode: 'ktm',
+    id: '9224',
+    label: 'ETS304',
+    routeId: null,
+    tripId: '9224',
+    position: [100.48, 5.85],
+    bearing: null,
+    fixSec: NOW / 1000 - 75,
+  }
+  const busSel: VehicleSelection = { kind: 'vehicle', mode: 'bus', id: 'VFB2440' }
+  const etsSel: VehicleSelection = { kind: 'vehicle', mode: 'ktm', id: '9224' }
+
+  it('keys a vehicle by mode and feed id, apart from trains and stations', () => {
+    const picked: Selection[] = [busSel, { ...busSel }, etsSel, { kind: 'station', lineId: 'AG', stopId: 'AG1' }]
+    expect(selectionKey(busSel)).toBe('vehicle:bus:VFB2440')
+    expect(distinctSelections(picked)).toHaveLength(3)
+  })
+
+  it('says on hover the mode, the route as a feed id, and the age', () => {
+    expect(vehicleHover(bus, NOW)).toBe('Rapid KL bus route U6000 (feed id) · 45 s ago')
+    expect(vehicleHover(ets, NOW)).toBe('KTM ETS (intercity) ETS304 · 75 s ago')
+  })
+
+  it('names the mode and Live GPS on the card, with the feed ids labelled as such', () => {
+    const card = vehicleCard(busSel, bus, NOW)
+    expect(card.pill).toBe('Rapid KL bus · Live GPS')
+    expect(card.rows).toEqual([
+      ['Route (feed id)', 'U6000'],
+      ['Vehicle (plate)', 'VFB2440'],
+      ['Trip (feed id)', 'weekday_U6000_U600001_9'],
+      ['Last report', '45 s ago'],
+    ])
+    expect(card.status).toBe('')
+    expect(card.canFollow).toBe(false)
+  })
+
+  it('names an ETS train by its label, with its trip id and the age', () => {
+    const card = vehicleCard(etsSel, ets, NOW)
+    expect(card.pill).toBe('KTM ETS (intercity) · Live GPS')
+    expect(card.title).toBe('ETS304')
+    expect(card.rows).toContainEqual(['Trip (feed id)', '9224'])
+    expect(card.rows).toContainEqual(['Last report', '75 s ago'])
+  })
+
+  it('says a vehicle is stale past four minutes, and stopped past ten, and since when', () => {
+    expect(vehicleCard(busSel, bus, NOW + 200_000).status).toMatch(/over 4 minutes/)
+    expect(vehicleCard(busSel, bus, NOW + 600_000).status).toBe(
+      'Stopped reporting. Its last report was 10 min ago, and it is no longer drawn.',
+    )
+    expect(vehicleCard(busSel, undefined, NOW).status).toMatch(/stopped reporting/)
+  })
+
+  it('labels a vehicle in a crowded pick', () => {
+    expect(selectionLabel(network, busSel)).toBe('Rapid KL bus VFB2440')
+    expect(selectionLabel(network, etsSel)).toBe('KTM ETS (intercity), trip 9224')
   })
 })

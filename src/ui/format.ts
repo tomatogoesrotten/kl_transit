@@ -1,5 +1,6 @@
 import type { DayType, KlTime } from '../sim'
-import type { ClockMode, Speed } from './store'
+import type { Rejected } from '../live/feed'
+import type { ClockMode, LiveStatus, Speed } from './store'
 
 const pad = (n: number) => String(Math.floor(n)).padStart(2, '0')
 
@@ -26,6 +27,18 @@ export function dur(sec: number): string {
   if (sec < 20) return 'now'
   if (sec < 90) return `${Math.round(sec / 5) * 5} s`
   return `${Math.round(sec / 60)} min`
+}
+
+/**
+ * How old a live report is: "45 s ago", "3 min ago".
+ *
+ * Exact seconds up to two minutes, then whole minutes rounded DOWN, so the
+ * label turns to "4 min ago" at the very moment a vehicle turns stale. Unlike
+ * `dur`, nothing is "now": a live position is always from some time ago, and
+ * saying how long is the point.
+ */
+export function ago(sec: number): string {
+  return sec < 120 ? `${Math.floor(sec)} s ago` : `${Math.floor(sec / 60)} min ago`
 }
 
 /**
@@ -78,4 +91,49 @@ export function stateLine(today: DayType, mode: ClockMode, speed: Speed): string
           ? `, ${speed}× speed`
           : ''
   return `${SVC_NAME[today]} timetable${how}`
+}
+
+/** How each kind of unusable report is described. */
+const REJECT_WORDS: Record<keyof Rejected, string> = {
+  missing: 'no position given',
+  nullIsland: 'reported at 0,0',
+  outside: 'outside Peninsular Malaysia',
+  incomplete: 'no vehicle id or time',
+}
+
+/**
+ * "1 position unusable: reported at 0,0." - or empty when every report in the
+ * latest response was usable. Never dropped silently, never said when there is
+ * nothing to say.
+ */
+export function rejectLine(r: Rejected): string {
+  const kinds = (Object.keys(REJECT_WORDS) as (keyof Rejected)[]).filter((k) => r[k] > 0)
+  const total = kinds.reduce((n, k) => n + r[k], 0)
+  if (total === 0) return ''
+  const why = kinds.map((k) => (kinds.length > 1 ? `${r[k]} ${REJECT_WORDS[k]}` : REJECT_WORDS[k]))
+  return `${total} position${total === 1 ? '' : 's'} unusable: ${why.join(', ')}.`
+}
+
+/**
+ * One live feed's condition, in a sentence or two.
+ *
+ * A failure is never an empty map: it says what went wrong, when the feed last
+ * answered, and how many vehicles are still drawn from before it.
+ *
+ * @param shown How many of this mode are drawn - held and not yet gone.
+ */
+export function liveStatusLine(s: LiveStatus, shown: number, nowMs: number): string {
+  const since =
+    s.lastOkMs === null ? 'It has not answered yet.' : `Last answered ${ago((nowMs - s.lastOkMs) / 1000)}.`
+  const still = shown > 0 ? ` ${shown} still shown from earlier reports.` : ''
+  const line = {
+    waiting: 'Waiting for the first report.',
+    ok: `${shown} shown, from live GPS.`,
+    empty: `The latest response was empty.${still}`,
+    unavailable: `Feed unavailable. ${since}${still}`,
+    'rate-limited': `Rate-limited by the API; trying again in a minute. ${since}${still}`,
+    unreadable: `The latest response could not be read. ${since}${still}`,
+  }[s.state]
+  const bad = rejectLine(s.rejected)
+  return bad ? `${line} ${bad}` : line
 }

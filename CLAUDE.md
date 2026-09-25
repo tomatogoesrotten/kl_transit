@@ -2,9 +2,11 @@
 
 A web app that shows Klang Valley trains (LRT, MRT, monorail, BRT Sunway) moving on a 3D map of
 Kuala Lumpur. Train positions are **calculated from Prasarana's published GTFS timetable**, because
-Rapid Rail has no live vehicle-position feed. Buses and KTM, which do have live GPS feeds, come later.
+Rapid Rail has no live vehicle-position feed. Rapid KL buses and KTM ETS trains, which do have live
+GPS feeds, are drawn beside them at their reported positions (issue #40).
 
-Honesty rule: the UI must always say positions are scheduled, not live. Never invent, smooth over,
+Honesty rule: the UI must always say which positions are scheduled (rail) and which are live GPS
+(buses, KTM ETS), and every live position says how old it is. Never invent, smooth over,
 or "fix" data silently. If the feed is wrong or missing, show that.
 
 ## About the owner
@@ -86,6 +88,7 @@ Conventions:
 ```
 src/sim/   pure TypeScript. Timetable in, train positions out. No DOM, no map, no Date.now().
 src/map/   MapLibre + deck.gl. Owns the animation loop and the layers.
+src/live/  live buses and KTM. feed.ts is pure (decode, validate, merge, age); poll.ts fetches.
 src/ui/    React components: clock, time controls, line list, train and station cards.
 data/      raw GTFS snapshot and the generated network.json (never edit network.json by hand)
 reference/ the working single-file prototype and golden test data. Read-only. Port from it, don't import it.
@@ -277,5 +280,45 @@ reference/ the working single-file prototype and golden test data. Read-only. Po
   not walks; turning them into a time belongs to the journey planner (#26). A place's position is
   the mean of its stops' on-track points — the true alignment, WITHOUT the shared-track pixel
   offset, which only `src/map` knows. Labels (#25) must resolve that there. Nothing draws places yet.
-- Next: issues #25 and #26 (labels and filtering, the journey planner), #40 (live buses and KTM),
-  and #35, where rotating while following still does not work on touch.
+- Live buses and KTM (issue #40) done, and seen by the owner at midday. `src/live/feed.ts`
+  is pure and scanned by `purity.test.ts`; `poll.ts` is the fetching half. Tested against four
+  recorded responses in `src/live/fixtures/` (`*.pb` is `binary` in `.gitattributes`, and
+  `assetsInclude` lets Vite inline them for tests). Live vehicles are drawn where the feed last put
+  them and NEVER extrapolated or smoothed; they show only while the clock is live.
+- Each feed is requested at most once a minute, never within 30 s of the other, so two requests a
+  minute against a documented limit of 4 (GTFS Realtime, 429 beyond it). Polling every 30 s each
+  would sit exactly on the limit; the bus content only changes every ~60 s and KTM fixes every 120 s.
+  Polling stops while the tab is hidden, the clock is not live, or the mode is switched off. The
+  request times live in the module so a remount cannot fetch early.
+- A fix is stale past 240 s (drawn faded and hollow) and gone past 600 s. Both from ONE midday
+  sample; re-sample at a peak and late at night before trusting them. Ages are clamped at zero
+  because the device clock can run behind the feed, and cannot be corrected: CORS hides `Date`.
+- The bindings put field defaults on the PROTOTYPE, so an absent string reads `""` (KTM's
+  `route_id`) and an absent number `0`. Presence is `hasOwnProperty`, never the value. Timestamps are
+  `Long`s, converted once with `Number()`. Latitude and longitude are proto2 REQUIRED, so the
+  generated `FeedMessage.decode` throws the WHOLE response away for one position missing either;
+  `decodeFeed` splits the message and decodes each entity alone, so that one is counted `missing`.
+- The KTMB feed carries only ETS intercity sets, no Komuter, so the mode is named
+  "KTM ETS (intercity)" everywhere via `MODE_NAME`, and the data notes say Komuter may be running.
+  Its bearings (all 0) and speeds (all 90) are placeholders: KTM is drawn as a directionless disc.
+  One sampled KTM train sat at 0.0027, 0.0155; positions within 0.1 degrees of 0,0 or outside
+  Peninsular Malaysia are not drawn and are COUNTED in the panel's status line, never dropped
+  silently. An empty KTM response (they alternate with full ones) keeps the held trains, ageing.
+- `IconLayer`'s `getAngle` turns ANTICLOCKWISE, so `angleFor(bearing)` is `360 - bearing` — read from
+  the installed vertex shader, pinned by a test.
+- Bus routes are shown by feed id (`U3000`, not route 300). Public numbers need a lookup from static
+  GTFS, which is part of #43.
+- Live markers are small and FLAT: at the map's pitch a ground-lying icon is foreshortened to about
+  half its height, so they were first drawn at 4-9 px and nobody could find them. They are 10-18 px
+  now, and coloured PER MAP VIEW (`LIVE_STYLE.color[view]`) - one dark slate vanished on the
+  wireframe. The legend swatch follows the view through CSS variables, not React.
+- `liveLayers` must FORGET a mode's instance when that mode is left out, including while the clock
+  is not live (the loop passes every mode as off then). deck.gl finalizes a layer the moment it
+  leaves the list; handing it back failed an assertion and left the vehicles unpickable.
+- Not yet done: the 08:00 and 23:30 re-samples that would confirm the 240 s / 600 s thresholds, the
+  panel at phone width and by keyboard, and a hover tooltip whose age freezes while the pointer
+  stays still. Carried into #43, which also replaces the arrows with 3D models and moves buses
+  between fixes - the owner relaxed "never extrapolate" for buses only, with the card saying the
+  position is estimated.
+- Next: #43 (bus view), #25 and #26 (labels and filtering, the journey planner), and #35, where
+  rotating while following still does not work on touch.

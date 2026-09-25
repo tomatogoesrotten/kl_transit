@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { network } from '../sim'
+import { LIVE_STYLE } from '../map/live'
 import { ink } from './format'
 import { selectionKey, selectionLabel } from './inspect'
 import { CARD_ROWS, panels } from './readout'
@@ -47,8 +48,13 @@ export function Card() {
 
   if (!selection || !cardOpen) return null
 
-  const line = network.lines.find((l) => l.id === selection.lineId)
-  const color = line?.color ?? '#6e7a8a'
+  const vehicle = selection.kind === 'vehicle'
+  // A live vehicle is on no line; its chip takes the colour it is drawn in on
+  // the city map. The chip is filled with white text, so the darker city
+  // colour reads on either panel, where the wireframe's pale one would not.
+  const color = vehicle
+    ? `rgb(${LIVE_STYLE.color.city[selection.mode].join(',')})`
+    : (network.lines.find((l) => l.id === selection.lineId)?.color ?? '#6e7a8a')
 
   return (
     <aside className="card" aria-label="Details">
@@ -58,7 +64,7 @@ export function Card() {
 
       <span
         className="pill"
-        style={{ background: color, color: ink(color) }}
+        style={{ background: color, color: vehicle ? '#ffffff' : ink(color) }}
         ref={(el) => {
           panels.pill = el
         }}
@@ -84,16 +90,19 @@ export function Card() {
       {/* The card's primary action, directly under what the train is doing. It
           used to sit below the five-row table, which on a short card meant
           scrolling to reach the one button most people want. */}
-      <button
-        className="btn"
-        aria-pressed={following}
-        onClick={toggleFollow}
-        ref={(el) => {
-          panels.follow = el
-        }}
-      >
-        {following ? 'Stop following' : 'Follow this train'}
-      </button>
+      {/* No follow for a live vehicle: it moves once a minute, in a jump. */}
+      {!vehicle && (
+        <button
+          className="btn"
+          aria-pressed={following}
+          onClick={toggleFollow}
+          ref={(el) => {
+            panels.follow = el
+          }}
+        >
+          {following ? 'Stop following' : 'Follow this train'}
+        </button>
+      )}
 
       <table
         ref={(el) => {
@@ -125,8 +134,13 @@ export function Card() {
         </tbody>
       </table>
 
-      {/* The honesty rule, on the one panel that gives times to the second. */}
-      <p className="sched">Scheduled from the published timetable, not a live feed.</p>
+      {/* The honesty rule, on the one panel that gives times to the second.
+          It differs by kind, because the two kinds of position differ. */}
+      <p className="sched">
+        {vehicle
+          ? 'Live GPS: where the vehicle last reported itself, and how long ago. Not predicted between reports.'
+          : 'Scheduled from the published timetable, not a live feed.'}
+      </p>
 
     </aside>
   )

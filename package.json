@@ -19,6 +19,7 @@
     "@deck.gl/layers": "^9.4.0",
     "@deck.gl/maplibre": "^9.4.0",
     "@deck.gl/mesh-layers": "^9.4.0",
+    "gtfs-realtime-bindings": "^2.2.0",
     "maplibre-gl": "^6.10.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

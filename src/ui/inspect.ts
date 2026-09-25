@@ -1,7 +1,9 @@
 import { DAY, hhmm, nextDepartures } from '../sim'
 import type { ActiveTrain, KlTime, Network, PreparedDirection, PreparedNetwork } from '../sim'
-import { dur } from './format'
-import type { Selection, StationSelection, TrainSelection } from './store'
+import { ageSec, freshness, MODE_NAME } from '../live/feed'
+import type { LiveVehicle } from '../live/feed'
+import { ago, dur } from './format'
+import type { Selection, StationSelection, TrainSelection, VehicleSelection } from './store'
 
 /**
  * What a card says, as plain strings.
@@ -13,8 +15,8 @@ import type { Selection, StationSelection, TrainSelection } from './store'
 export interface CardContent {
   /** The coloured chip: a line code for a train, a stop id for a station. */
   pill: string
-  /** Whose colour the chip takes. */
-  lineId: string
+  /** Whose colour the chip takes, or null for a live vehicle, which is on no line. */
+  lineId: string | null
   title: string
   sub: string
   /** What is happening right now, or why we cannot say. Empty when there is nothing. */
@@ -114,7 +116,7 @@ function lostStatus(lost: Lost, origin: string, terminus: string): string {
   )
 }
 
-function missing(sel: Selection, what: string): CardContent {
+function missing(sel: TrainSelection | StationSelection, what: string): CardContent {
   return {
     pill: '?',
     lineId: sel.lineId,
@@ -280,13 +282,83 @@ export function stationCard(
   }
 }
 
+/**
+ * A live bus or KTM train: what the feed calls it, and how old its report is.
+ *
+ * Feed identifiers are shown as the feed gives them and labelled as such.
+ * `U6000` is Prasarana's internal id for public route 300, and saying "300"
+ * would need a lookup from static GTFS that version 1 does not have.
+ *
+ * @param v The newest report held for it, or the last one seen before it was
+ *   dropped, or undefined when there is none at all.
+ * @param nowMs The present, epoch ms. Vehicles are only shown while the clock is live.
+ */
+export function vehicleCard(
+  sel: VehicleSelection,
+  v: LiveVehicle | undefined,
+  nowMs: number,
+): CardContent {
+  const head = {
+    pill: `${MODE_NAME[sel.mode]} · Live GPS`,
+    lineId: null,
+    head: '',
+    canFollow: false,
+  }
+  if (!v) {
+    return {
+      ...head,
+      title: sel.mode === 'bus' ? `Bus ${sel.id}` : `Trip ${sel.id}`,
+      sub: '',
+      status: 'This vehicle has stopped reporting, and no report of it is held.',
+      rows: [],
+    }
+  }
+  const rows: [string, string][] =
+    sel.mode === 'bus'
+      ? [
+          ['Route (feed id)', v.routeId ?? 'not given'],
+          ['Vehicle (plate)', v.id],
+          ['Trip (feed id)', v.tripId ?? 'not given'],
+        ]
+      : [
+          ['Train', v.label ?? 'not given'],
+          ['Trip (feed id)', v.tripId ?? 'not given'],
+        ]
+  const age = ageSec(v.fixSec, nowMs)
+  rows.push(['Last report', ago(age)])
+  const f = freshness(v.fixSec, nowMs)
+  return {
+    ...head,
+    title: sel.mode === 'bus' ? `Route ${v.routeId ?? '?'} (feed id)` : (v.label ?? `Trip ${v.id}`),
+    sub: 'Drawn where its GPS last put it. Not predicted or smoothed between reports.',
+    status:
+      f === 'gone'
+        ? `Stopped reporting. Its last report was ${ago(age)}, and it is no longer drawn.`
+        : f === 'stale'
+          ? `No report for over 4 minutes. Drawn faded, where it last reported.`
+          : '',
+    rows,
+  }
+}
+
+/** A live vehicle under the pointer, in a few words. */
+export function vehicleHover(v: LiveVehicle, nowMs: number): string {
+  const what = v.mode === 'bus' ? `route ${v.routeId ?? '?'} (feed id)` : (v.label ?? `trip ${v.id}`)
+  return `${MODE_NAME[v.mode]} ${what} · ${ago(ageSec(v.fixSec, nowMs))}`
+}
+
+/**
+ * @param vehicle For a vehicle selection, its report - see `vehicleCard`.
+ */
 export function cardContent(
   rail: PreparedNetwork,
   sel: Selection,
   trains: readonly ActiveTrain[],
   t: KlTime,
   ms: number,
+  vehicle?: LiveVehicle,
 ): CardContent {
+  if (sel.kind === 'vehicle') return vehicleCard(sel, vehicle, ms)
   return sel.kind === 'train'
     ? trainCard(rail, sel, trains, ms)
     : stationCard(rail, sel, trains, t)
@@ -300,6 +372,7 @@ export function cardContent(
  * renderer's `ActiveTrain.id` is renamed by midnight and by a forced timetable.
  */
 export function selectionKey(sel: Selection): string {
+  if (sel.kind === 'vehicle') return `vehicle:${sel.mode}:${sel.id}`
   return sel.kind === 'train'
     ? `train:${sel.lineId}:${sel.dir}:${sel.dep}`
     : `station:${sel.lineId}:${sel.stopId}`
@@ -336,6 +409,9 @@ export function distinctSelections(picked: readonly (Selection | null)[]): Selec
  * it too.
  */
 export function selectionLabel(net: Network, sel: Selection): string {
+  if (sel.kind === 'vehicle') {
+    return sel.mode === 'bus' ? `${MODE_NAME.bus} ${sel.id}` : `${MODE_NAME.ktm}, trip ${sel.id}`
+  }
   const line = net.lines.find((l) => l.id === sel.lineId)
   if (sel.kind === 'station') {
     return `${net.stations[sel.stopId]?.name ?? sel.stopId} · ${line?.name ?? sel.lineId}`
